@@ -270,7 +270,7 @@ const screens = {
               id: 'hist_' + Date.now(), type: 'done', machineId: id,
               machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
               orderNo: task.orderNo, partName: task.partName, total: task.total, qty: qty, eventDate, 
-              isUrgent: task.isUrgent, note: task.note, // Сохраняем в историю
+              isUrgent: task.isUrgent, note: task.note,
               linkedTaskId: task.id, status: 'active'
             };
             await put('history', historyRecord);
@@ -305,6 +305,10 @@ const screens = {
           if (!isFirst) moveHtml += `<button type="button" class="btn btn-secondary" id="act-up" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">⬆️ Поднять в очереди</button>`;
           if (!isLast) moveHtml += `<button type="button" class="btn btn-secondary" id="act-down" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">⬇️ Опустить в очереди</button>`;
 
+          // Кнопки быстрого доступа к срочности и заметке
+          const urgentBtnText = task.isUrgent ? '❌ Убрать срочность' : '🚨 Сделать срочной';
+          const noteBtnText = task.note ? '📝 Изменить заметку' : '📝 Добавить заметку';
+
           openModal('Действия с задачей', `
             <div style="margin-bottom:20px; font-size:15px;">
               <strong>${task.partName}</strong><br>
@@ -312,6 +316,8 @@ const screens = {
             </div>
             <div style="display:flex; flex-direction:column;">
               ${moveHtml}
+              <button type="button" class="btn btn-secondary" id="act-urgent" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">${urgentBtnText}</button>
+              <button type="button" class="btn btn-secondary" id="act-note" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">${noteBtnText}</button>
               <button type="button" class="btn btn-secondary" id="act-edit" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">✏️ Редактировать</button>
               <button type="button" class="btn btn-secondary" id="act-move" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">➡️ Переместить на другой станок</button>
               <button type="button" class="btn btn-danger" id="act-cancel" style="width:100%; text-align:left; padding:15px; background:var(--danger); color:#fff;">🗑️ Отменить задачу</button>
@@ -321,6 +327,32 @@ const screens = {
           setTimeout(() => {
             const overlay = document.querySelector('.modal-overlay');
             
+            // БЫСТРАЯ СРОЧНОСТЬ
+            overlay.querySelector('#act-urgent').onclick = async () => {
+              task.isUrgent = !task.isUrgent;
+              await put('tasks', task);
+              overlay.remove();
+              render();
+              showToast(task.isUrgent ? '🚨 Задача срочная' : 'Срочность снята');
+            };
+
+            // БЫСТРАЯ ЗАМЕТКА
+            overlay.querySelector('#act-note').onclick = () => {
+              overlay.remove();
+              openModal('Заметка к задаче', `
+                <div class="form-group">
+                  <label>Текст заметки (оставьте пустым, чтобы удалить)</label>
+                  <textarea name="note" rows="3">${task.note || ''}</textarea>
+                </div>
+              `, 'Сохранить', async (ov) => {
+                const f = ov.querySelector('form');
+                task.note = f.note.value.trim();
+                await put('tasks', task);
+                render();
+                return true;
+              });
+            };
+
             const btnUp = overlay.querySelector('#act-up');
             if (btnUp) {
               btnUp.onclick = async () => {
@@ -421,7 +453,7 @@ const screens = {
                 id: 'hist_' + Date.now(), type: 'cancel', machineId: id,
                 machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
                 orderNo: task.orderNo, partName: task.partName, total: task.total, qty: remaining, eventDate: formatDate(new Date()), 
-                isUrgent: task.isUrgent, note: task.note, // Сохраняем в историю
+                isUrgent: task.isUrgent, note: task.note,
                 linkedTaskId: task.id, status: 'active'
               };
               
@@ -595,8 +627,8 @@ const screens = {
                   partName: histItem.partName, 
                   total: histItem.total, 
                   done: histItem.total - histItem.qty,
-                  isUrgent: histItem.isUrgent || false, // Восстанавливаем срочность
-                  note: histItem.note || '', // Восстанавливаем заметку
+                  isUrgent: histItem.isUrgent || false,
+                  note: histItem.note || '',
                   createdAt: new Date().toISOString()
                 };
                 await put('tasks', newTask);
@@ -667,7 +699,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 1.6 · заметки и срочность</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 1.7 · быстрые действия</div>
       `;
     },
     afterRender: () => {
@@ -846,7 +878,6 @@ async function init() {
     await seedDB();
     state.machines = await getAll('machines');
     
-    // Устанавливаем даты истории на сегодня по умолчанию
     const today = formatDate(new Date());
     state.historyStartDate = today;
     state.historyEndDate = today;
