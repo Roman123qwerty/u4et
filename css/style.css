@@ -46,7 +46,7 @@ body {
 }
 #tabbar a {
   flex: 1; display: flex; align-items: center; justify-content: center;
-  color: var(--text-muted); text-decoration: none; font-size: 13px; font-weight: 500;
+  color: var(--text-muted); text-decoration: none; font-size: 12px; font-weight: 500;
 }
 #tabbar a.active { color: var(--accent); }
 
@@ -114,6 +114,37 @@ body {
 }
 .btn-check:active { background: var(--ok); color: #fff; }
 
+/* --- Данные (Подвкладки) --- */
+.sub-tabs {
+  display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
+}
+.sub-tab {
+  flex: 1; text-align: center; padding: 8px; border-radius: 8px;
+  font-weight: 600; color: var(--text-muted); cursor: pointer; font-size: 15px;
+}
+.sub-tab.active { background: var(--accent); color: #fff; }
+
+.list-item {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px; margin-bottom: 8px; cursor: pointer;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.list-item-title { font-size: 16px; font-weight: 500; }
+.list-item-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+/* Фото и теги в карточках */
+.photo-preview {
+  width: 100%; height: 200px; border-radius: 8px; object-fit: contain;
+  background: var(--bg); margin-bottom: 12px; border: 1px dashed var(--border);
+}
+.tags-container { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tag {
+  background: var(--border); color: var(--text); padding: 4px 10px; border-radius: 16px; font-size: 14px;
+  display: flex; align-items: center; gap: 6px;
+}
+.tag.active { background: var(--accent); color: #fff; }
+.tag-checkbox { display: none; }
+
 /* --- История --- */
 .history-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 10px;
@@ -152,7 +183,7 @@ body {
 
 .form-group { margin-bottom: 14px; }
 .form-group label { display: block; font-size: 14px; color: var(--text-muted); margin-bottom: 4px; }
-.form-group input[type="text"], .form-group input[type="number"], .form-group input[type="date"], .form-group textarea {
+.form-group input[type="text"], .form-group input[type="number"], .form-group input[type="date"], .form-group textarea, .form-group select {
   width: 100%; padding: 12px; border: 1px solid var(--border);
   border-radius: 8px; background: var(--bg); color: var(--text); font-size: 16px; font-family: inherit;
 }
