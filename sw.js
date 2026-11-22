@@ -1,4 +1,4 @@
-const CACHE = 'uchet-v22';
+const CACHE = 'uchet-v24';
 const ASSETS = [
   './', './index.html', './css/style.css', 
   './js/app.js', './js/db.js', './js/xlsx.full.min.js',
@@ -30,14 +30,12 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// СТРАТЕГИЯ NETWORK FIRST: сначала пытаемся скачать из интернета, если нет - берем из кэша
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
   
   e.respondWith(
     fetch(e.request)
       .then((response) => {
-        // Если сеть работает, обновляем кэш и возвращаем свежий файл
         const responseClone = response.clone();
         caches.open(CACHE).then((cache) => {
           cache.put(e.request, responseClone);
@@ -45,7 +43,6 @@ self.addEventListener('fetch', (e) => {
         return response;
       })
       .catch(() => {
-        // Если интернета нет, отдаем то, что сохранено в памяти
         return caches.match(e.request);
       })
   );
