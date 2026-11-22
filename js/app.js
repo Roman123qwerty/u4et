@@ -83,7 +83,7 @@ function openModal(title, contentHTML, confirmText, onSubmit) {
     const success = await onSubmit(overlay);
     if (success) close();
   };
-  setTimeout(() => overlay.querySelector('input')?.focus(), 100);
+  setTimeout(() => overlay.querySelector('input[type="text"]')?.focus(), 100);
 }
 
 // ---- Экраны ----
@@ -106,10 +106,11 @@ const screens = {
             <div class="overview-col-body">
               ${mTasks.length === 0 ? '<div style="text-align:center;color:var(--text-muted);font-size:13px;margin-top:20px;">Пусто</div>' : ''}
               ${mTasks.map(t => `
-                <div class="overview-task">
-                  <div class="ot-title">Заказ ${t.orderNo}</div>
+                <div class="overview-task ${t.isUrgent ? 'urgent' : ''}">
+                  <div class="ot-title">Заказ ${t.orderNo} ${t.isUrgent ? '🚨' : ''}</div>
                   <div>${t.partName}</div>
                   <div class="ot-qty">⏳ ${t.total - t.done}(${t.total})</div>
+                  ${t.note ? `<div class="ot-note">📝 ${t.note}</div>` : ''}
                 </div>
               `).join('')}
             </div>
@@ -138,7 +139,7 @@ const screens = {
             ${hasTasks ? `
               <div class="machine-first-task">
                 №${firstTask.pos} ⏳ ${firstTask.total - firstTask.done}(${firstTask.total}) 
-                <span style="color:var(--accent); font-weight:600">Заказ ${firstTask.orderNo}</span> · ${firstTask.partName}
+                <span style="color:var(--accent); font-weight:600">Заказ ${firstTask.orderNo}</span> · ${firstTask.partName} ${firstTask.isUrgent ? '🚨' : ''}
               </div>
             ` : `<div class="machine-queue-empty">очередь пуста</div>`}
           </div>
@@ -168,14 +169,16 @@ const screens = {
         state.currentMachineTasks.forEach((t, index) => {
           const remaining = t.total - t.done;
           html += `
-            <div class="task-card">
+            <div class="task-card ${t.isUrgent ? 'urgent' : ''}">
               <div class="task-content">
                 <div class="task-header">
                   <span>№${index + 1}</span>
                   <span class="task-order">Заказ ${t.orderNo}</span>
+                  ${t.isUrgent ? '<span class="urgent-badge">СРОЧНО</span>' : ''}
                 </div>
                 <div class="task-part">${t.partName}</div>
                 <div class="task-qty">⏳ ${remaining}(${t.total})</div>
+                ${t.note ? `<div class="task-note">📝 ${t.note}</div>` : ''}
               </div>
               <div style="display:flex; align-items:center;">
                 <button class="btn-check" data-id="${t.id}">✓</button>
@@ -205,18 +208,33 @@ const screens = {
             <label>Количество</label>
             <input type="number" name="total" min="1" value="1" required>
           </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" name="isUrgent"> 🚨 Срочная задача
+            </label>
+          </div>
+          <div class="form-group">
+            <label>Заметка (необязательно)</label>
+            <textarea name="note" placeholder="Например: требует проверки ОТК"></textarea>
+          </div>
         `, 'Добавить', async (overlay) => {
           const form = overlay.querySelector('form');
           const { value: orderNo, warning } = normalizeOrderNo(form.orderNo.value);
           if (warning) showToast(`Внимание: ${warning}`);
           const partName = form.partName.value.trim();
           const total = parseInt(form.total.value, 10);
+          const isUrgent = form.isUrgent.checked;
+          const note = form.note.value.trim();
           
           if (state.currentMachineTasks.some(t => t.orderNo === orderNo && t.partName.toLowerCase() === partName.toLowerCase())) {
             if (!confirm(`Задача "${partName}" по заказу ${orderNo} уже есть в очереди. Всё равно добавить?`)) return false;
           }
 
-          const newTask = { id: 'task_' + Date.now(), machineId: id, pos: state.currentMachineTasks.length + 1, orderNo, partName, total, done: 0, createdAt: new Date().toISOString() };
+          const newTask = { 
+            id: 'task_' + Date.now(), machineId: id, pos: state.currentMachineTasks.length + 1, 
+            orderNo, partName, total, done: 0, isUrgent, note,
+            createdAt: new Date().toISOString() 
+          };
           await put('tasks', newTask);
           render();
           return true;
@@ -251,7 +269,9 @@ const screens = {
             const historyRecord = {
               id: 'hist_' + Date.now(), type: 'done', machineId: id,
               machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
-              orderNo: task.orderNo, partName: task.partName, total: task.total, qty: qty, eventDate, linkedTaskId: task.id, status: 'active'
+              orderNo: task.orderNo, partName: task.partName, total: task.total, qty: qty, eventDate, 
+              isUrgent: task.isUrgent, note: task.note, // Сохраняем в историю
+              linkedTaskId: task.id, status: 'active'
             };
             await put('history', historyRecord);
 
@@ -337,12 +357,23 @@ const screens = {
                 <div class="form-group"><label>Номер заказа</label><input type="text" name="orderNo" value="${task.orderNo}" required></div>
                 <div class="form-group"><label>Название детали</label><input type="text" name="partName" value="${task.partName}" required></div>
                 <div class="form-group"><label>Всего нужно (сделано ${task.done})</label><input type="number" name="total" min="${Math.max(1, task.done)}" value="${task.total}" required></div>
+                <div class="form-group">
+                  <label class="checkbox-label">
+                    <input type="checkbox" name="isUrgent" ${task.isUrgent ? 'checked' : ''}> 🚨 Срочная задача
+                  </label>
+                </div>
+                <div class="form-group">
+                  <label>Заметка</label>
+                  <textarea name="note">${task.note || ''}</textarea>
+                </div>
               `, 'Сохранить', async (ov) => {
                 const f = ov.querySelector('form');
                 const { value: orderNo } = normalizeOrderNo(f.orderNo.value);
                 task.orderNo = orderNo;
                 task.partName = f.partName.value.trim();
                 task.total = parseInt(f.total.value, 10);
+                task.isUrgent = f.isUrgent.checked;
+                task.note = f.note.value.trim();
                 await put('tasks', task);
                 render(); return true;
               });
@@ -389,7 +420,9 @@ const screens = {
               const cancelRecord = {
                 id: 'hist_' + Date.now(), type: 'cancel', machineId: id,
                 machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
-                orderNo: task.orderNo, partName: task.partName, total: task.total, qty: remaining, eventDate: formatDate(new Date()), linkedTaskId: task.id, status: 'active'
+                orderNo: task.orderNo, partName: task.partName, total: task.total, qty: remaining, eventDate: formatDate(new Date()), 
+                isUrgent: task.isUrgent, note: task.note, // Сохраняем в историю
+                linkedTaskId: task.id, status: 'active'
               };
               
               deleteItem('tasks', task.id).then(() => put('history', cancelRecord)).then(() => {
@@ -434,8 +467,9 @@ const screens = {
           activeTasks.forEach(t => {
             const m = state.machines.find(x => x.id === t.machineId);
             html += `<div class="order-item">
-              <span style="color:var(--accent); font-weight:600">Заказ ${t.orderNo}</span> · ${t.partName}<br>
+              <span style="color:var(--accent); font-weight:600">Заказ ${t.orderNo}</span> · ${t.partName} ${t.isUrgent ? '🚨' : ''}<br>
               <span style="color:var(--text-muted); font-size:14px;">Станок: ${m ? m.number + '. ' + m.model : '?'} · Позиция №${t.pos} · Осталось: ${t.total - t.done}(${t.total})</span>
+              ${t.note ? `<br><span style="font-size:13px; font-style:italic; color:var(--text-muted)">📝 ${t.note}</span>` : ''}
             </div>`;
           });
           html += '</div>';
@@ -449,6 +483,7 @@ const screens = {
               <span style="color:var(--accent); font-weight:600">Заказ ${h.orderNo}</span> · ${h.partName}<br>
               <span style="color:var(--text-muted); font-size:14px;">${h.machineSnapshot} · ${h.eventDate} · </span>
               <span class="history-qty ${isCancel ? 'cancel' : ''}">${isCancel ? 'Отменено (' + h.qty + ')' : h.qty + '/' + h.total}</span>
+              ${h.note ? `<br><span style="font-size:13px; font-style:italic; color:var(--text-muted)">📝 ${h.note}</span>` : ''}
             </div>`;
           });
           html += '</div>';
@@ -505,10 +540,11 @@ const screens = {
                 <span>${h.eventDate} · ${h.machineSnapshot}</span>
                 <span style="color:var(--accent); font-weight:600">Заказ ${h.orderNo}</span>
               </div>
-              <div class="history-part">${h.partName}</div>
+              <div class="history-part">${h.partName} ${h.isUrgent ? '🚨' : ''}</div>
               <div class="history-qty ${isCancel ? 'cancel' : ''}">
                 ${isCancel ? '✕ Отменено (остаток ' + h.qty + ')' : '✓ Сделано ' + h.qty + ' из ' + h.total}
               </div>
+              ${h.note ? `<div style="font-size:13px; font-style:italic; color:var(--text-muted); margin-top:4px;">📝 ${h.note}</div>` : ''}
               <div class="history-actions">
                 <button class="btn-small btn-return" data-id="${h.id}">
                   ${isCancel ? 'Возобновить в очередь' : 'Вернуть в очередь'}
@@ -559,6 +595,8 @@ const screens = {
                   partName: histItem.partName, 
                   total: histItem.total, 
                   done: histItem.total - histItem.qty,
+                  isUrgent: histItem.isUrgent || false, // Восстанавливаем срочность
+                  note: histItem.note || '', // Восстанавливаем заметку
                   createdAt: new Date().toISOString()
                 };
                 await put('tasks', newTask);
@@ -629,7 +667,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 1.5 · Network First</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 1.6 · заметки и срочность</div>
       `;
     },
     afterRender: () => {
@@ -667,9 +705,9 @@ const screens = {
         const wb = XLSX.utils.book_new();
         const historyActive = state.history.filter(h => h.status === 'active');
 
-        const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего']];
+        const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего', 'Срочно', 'Заметка']];
         historyActive.filter(h => h.type === 'done').forEach(h => {
-          wsDoneData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.total]);
+          wsDoneData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.total, h.isUrgent ? 'Да' : '', h.note || '']);
         });
         const wsDone = XLSX.utils.aoa_to_sheet(wsDoneData);
         XLSX.utils.book_append_sheet(wb, wsDone, 'Выполнено');
@@ -688,9 +726,9 @@ const screens = {
         const wsSummary = XLSX.utils.aoa_to_sheet(wsSummaryData);
         XLSX.utils.book_append_sheet(wb, wsSummary, 'По заказам');
 
-        const wsCancelData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Остаток']];
+        const wsCancelData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Остаток', 'Заметка']];
         historyActive.filter(h => h.type === 'cancel').forEach(h => {
-          wsCancelData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty]);
+          wsCancelData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.note || '']);
         });
         const wsCancel = XLSX.utils.aoa_to_sheet(wsCancelData);
         XLSX.utils.book_append_sheet(wb, wsCancel, 'Отменено');
