@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <title>Учет</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+ <header id="app-header">
+  <div class="header-left">
+    <button id="btn-back">‹</button>
+    <span id="app-title">Учет</span>
+  </div>
+  <span id="app-actions"></span>
+ </header>
+
+  <main id="app-main"></main>
+
+  <nav id="tabbar">
+    <a href="#/overview" data-tab="overview">Обзор</a>
+    <a href="#/machines" data-tab="machines">Станки</a>
+    <a href="#/orders" data-tab="orders">Заказы</a>
+    <a href="#/history" data-tab="history">История</a>
+    <a href="#/settings" data-tab="settings">Настройки</a>
+  </nav>
+
+  <script src="js/xlsx.full.min.js"></script>
+  
+  <script src="js/db.js?v=19"></script>
+  <script src="js/app.js?v=19"></script>
+</body>
+</html>
