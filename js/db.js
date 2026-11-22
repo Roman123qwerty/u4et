@@ -1,5 +1,5 @@
 const DB_NAME = 'uchet-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // ПОДНЯЛИ ВЕРСИЮ ДЛЯ НОВЫХ ТАБЛИЦ
 let dbInstance = null;
 
 const MACHINES_SEED = [
@@ -37,6 +37,15 @@ function openDB() {
         store.createIndex('orderNo', 'orderNo', { unique: false });
         store.createIndex('machineId', 'machineId', { unique: false });
       }
+      // НОВЫЕ ТАБЛИЦЫ СПРАВОЧНИКОВ
+      if (!db.objectStoreNames.contains('parts')) {
+        const store = db.createObjectStore('parts', { keyPath: 'id' });
+        store.createIndex('name', 'name', { unique: false });
+      }
+      if (!db.objectStoreNames.contains('toolings')) {
+        const store = db.createObjectStore('toolings', { keyPath: 'id' });
+        store.createIndex('code', 'code', { unique: false });
+      }
     };
     req.onsuccess = (e) => { dbInstance = e.target.result; resolve(dbInstance); };
     req.onerror = (e) => reject(e.target.error);
@@ -63,7 +72,6 @@ async function put(storeName, obj) {
   });
 }
 
-// НОВОЕ: Удаление записи (нужно для отмены выполненных действий)
 async function deleteItem(storeName, id) {
   const db = await openDB();
   return new Promise((resolve, reject) => {
@@ -95,4 +103,4 @@ async function seedDB() {
       await put('machines', m);
     }
   }
-}
+                                           }
