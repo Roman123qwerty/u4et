@@ -23,7 +23,7 @@ const state = {
   machines: [], currentMachineTasks: [], allTasks: [], history: [],
   parts: [], toolings: [], 
   historyStartDate: '', historyEndDate: '', searchOrder: '',
-  dataSubTab: 'parts' // 'parts' | 'toolings' | 'orders'
+  dataSubTab: 'parts'
 };
 
 // ---- Утилиты ----
@@ -196,6 +196,9 @@ const screens = {
       } else {
         state.currentMachineTasks.forEach((t, index) => {
           const remaining = t.total - t.done;
+          // Проверяем, есть ли деталь в базе для ссылки
+          const partLink = t.partId ? `<a href="#/part/${t.partId}" class="task-part linked">${t.partName}</a>` : `<div class="task-part">${t.partName}</div>`;
+          
           html += `
             <div class="task-card ${t.isUrgent ? 'urgent' : ''}">
               <div class="task-content">
@@ -204,7 +207,7 @@ const screens = {
                   <span class="task-order">Заказ ${t.orderNo}</span>
                   ${t.isUrgent ? '<span class="urgent-badge">СРОЧНО</span>' : ''}
                 </div>
-                <div class="task-part">${t.partName}</div>
+                ${partLink}
                 <div class="task-qty">⏳ ${remaining}(${t.total})</div>
                 ${t.note ? `<div class="task-note">📝 ${t.note}</div>` : ''}
               </div>
@@ -220,16 +223,25 @@ const screens = {
       return html;
     },
     afterRender: (id) => {
+      // ДОБАВЛЕНИЕ ЗАДАЧИ С АВТОДОПОЛНЕНИЕМ
       document.getElementById('btn-add-task').onclick = () => {
+        let selectedPartId = null; // Сюда сохраняем ID выбранной детали
+        
         openModal('Новая задача', `
           <div class="form-group">
             <label>Номер заказа (NN.NN)</label>
             <input type="text" name="orderNo" placeholder="69.27">
             <div class="hint" id="order-hint"></div>
           </div>
-          <div class="form-group">
+          <div class="form-group autocomplete-container">
             <label>Название детали</label>
-            <input type="text" name="partName" placeholder="Вал 20х100">
+            <input type="text" name="partName" id="task-part-input" placeholder="Введите название..." autocomplete="off">
+            <div id="autocomplete-list" class="autocomplete-list"></div>
+          </div>
+          <div class="form-group" id="add-to-db-container" style="display:none; margin-top:-8px; margin-bottom:14px;">
+            <label class="checkbox-label" style="font-size:14px; color:var(--accent);">
+              <input type="checkbox" name="addToDB"> Внести деталь в базу
+            </label>
           </div>
           <div class="form-group">
             <label>Количество</label>
@@ -249,14 +261,22 @@ const screens = {
           const { value: orderNo, warning } = normalizeOrderNo(form.orderNo.value);
           if (warning) showToast(`Внимание: ${warning}`);
           
-          const partName = form.partName.value.trim();
-          const total = parseInt(form.total.value, 10);
+          let partName = form.partName.value.trim();
+          let total = parseInt(form.total.value, 10);
           const isUrgent = form.isUrgent.checked;
           const note = form.note.value.trim();
+          const addToDB = form.addToDB ? form.addToDB.checked : false;
 
           if (!orderNo || !partName) { showToast('Заполните номер заказа и название детали'); return false; }
           if (isNaN(total) || total < 1) { showToast('Количество должно быть больше 0'); return false; }
           
+          // Если пользователь ввел вручную и поставил галочку "Внести в базу"
+          if (addToDB && !selectedPartId) {
+            const newPartId = 'part_' + Date.now();
+            await put('parts', { id: newPartId, name: partName, note: '', toolingIds: [], machineIds: [id], photo: '' });
+            selectedPartId = newPartId;
+          }
+
           if (state.currentMachineTasks.some(t => t.orderNo === orderNo && t.partName.toLowerCase() === partName.toLowerCase())) {
             if (!confirm(`Задача "${partName}" по заказу ${orderNo} уже есть в очереди. Всё равно добавить?`)) return false;
           }
@@ -264,20 +284,68 @@ const screens = {
           const newTask = { 
             id: 'task_' + Date.now(), machineId: id, pos: state.currentMachineTasks.length + 1, 
             orderNo, partName, total, done: 0, isUrgent, note,
+            partId: selectedPartId, // Привязываем ID детали (если есть)
             createdAt: new Date().toISOString() 
           };
           await put('tasks', newTask);
           render();
           return true;
         });
-        const orderInput = document.querySelector('input[name="orderNo"]');
-        const hint = document.getElementById('order-hint');
-        orderInput.addEventListener('input', () => {
-          const { warning } = normalizeOrderNo(orderInput.value);
-          hint.textContent = warning || ''; hint.style.display = warning ? 'block' : 'none';
-        });
+
+        // Логика работы выпадающего списка
+        setTimeout(() => {
+          const input = document.getElementById('task-part-input');
+          const list = document.getElementById('autocomplete-list');
+          const dbContainer = document.getElementById('add-to-db-container');
+          const orderInput = document.querySelector('input[name="orderNo"]');
+          const hint = document.getElementById('order-hint');
+
+          // Валидация заказа
+          orderInput.addEventListener('input', () => {
+            const { warning } = normalizeOrderNo(orderInput.value);
+            hint.textContent = warning || ''; hint.style.display = warning ? 'block' : 'none';
+          });
+
+          // Автодополнение
+          input.addEventListener('input', () => {
+            const val = input.value.toLowerCase().trim();
+            list.innerHTML = '';
+            selectedPartId = null; // Сбрасываем выбор при ручном вводе
+            dbContainer.style.display = 'none';
+
+            if (!val) { list.style.display = 'none'; return; }
+
+            const matches = state.parts.filter(p => p.name.toLowerCase().includes(val)).slice(0, 10);
+            
+            if (matches.length > 0) {
+              list.style.display = 'block';
+              matches.forEach(p => {
+                const div = document.createElement('div');
+                div.className = 'autocomplete-item';
+                div.innerHTML = `<div class="ac-title">${p.name}</div>`;
+                div.onclick = () => {
+                  input.value = p.name;
+                  selectedPartId = p.id;
+                  list.style.display = 'none';
+                  dbContainer.style.display = 'none'; // Скрываем галочку, т.к. деталь уже в базе
+                };
+                list.appendChild(div);
+              });
+            } else {
+              list.style.display = 'none';
+              // Если совпадений нет и это новая деталь, показываем галочку
+              if (val.length > 2) dbContainer.style.display = 'block';
+            }
+          });
+
+          // Скрываем список при клике вне его
+          input.addEventListener('blur', () => {
+            setTimeout(() => { list.style.display = 'none'; }, 200);
+          });
+        }, 100);
       };
 
+      // ВЫПОЛНЕНИЕ
       document.querySelectorAll('.btn-check').forEach(btn => {
         btn.onclick = () => {
           const task = state.currentMachineTasks.find(t => t.id === btn.dataset.id);
@@ -322,6 +390,7 @@ const screens = {
         };
       });
 
+      // МЕНЮ (⋯) - сокращено для читаемости, логика идентична v28
       document.querySelectorAll('.btn-menu').forEach(btn => {
         btn.onclick = () => {
           const task = state.currentMachineTasks.find(t => t.id === btn.dataset.id);
@@ -357,9 +426,7 @@ const screens = {
             
             overlay.querySelector('#act-urgent').onclick = async () => {
               task.isUrgent = !task.isUrgent;
-              await put('tasks', task);
-              overlay.remove();
-              render();
+              await put('tasks', task); overlay.remove(); render();
             };
 
             overlay.querySelector('#act-note').onclick = () => {
@@ -372,9 +439,7 @@ const screens = {
               `, 'Сохранить', async (ov) => {
                 const f = ov.querySelector('form');
                 task.note = f.note.value.trim();
-                await put('tasks', task);
-                render();
-                return true;
+                await put('tasks', task); render(); return true;
               });
             };
 
@@ -613,15 +678,18 @@ const screens = {
               <label>Станки, где делали</label>
               <div style="padding:12px; background:var(--bg); border-radius:8px; min-height:44px;">${mNames || '<span style="color:var(--text-muted)">Нет</span>'}</div>
             </div>
-            <div class="modal-actions" style="margin-top:20px;">
-              <button type="button" class="btn btn-primary" onclick="location.hash='#/part/${part.id}/edit'">✏️ Редактировать</button>
-              <button type="button" class="btn" id="btn-delete-part" style="background:var(--danger); color:#fff;">Удалить</button>
+            <div class="modal-actions" style="margin-top:20px; flex-direction:column;">
+              <button type="button" class="btn btn-primary" id="btn-add-task-from-part" style="margin-bottom:10px;">➕ Добавить в задание</button>
+              <div style="display:flex; gap:10px;">
+                <button type="button" class="btn btn-secondary" onclick="location.hash='#/part/${part.id}/edit'">✏️ Редактировать</button>
+                <button type="button" class="btn" id="btn-delete-part" style="background:var(--danger); color:#fff;">Удалить</button>
+              </div>
             </div>
           </div>
         `;
       }
 
-      // РЕЖИМ РЕДАКТИРОВАНИЯ
+      // РЕЖИМ РЕДАКТИРОВАНИЯ (сокращено, логика идентична v28)
       return `
         <div class="card" style="margin-top:0;">
           <div class="form-group">
@@ -662,9 +730,10 @@ const screens = {
     afterRender: (id, action) => {
       const isNew = id === 'new';
       const isEdit = action === 'edit' || isNew;
+      const part = isNew ? { toolingIds: [], machineIds: [] } : state.parts.find(p => p.id === id);
 
       if (!isEdit) {
-        // Обработчик удаления в режиме просмотра
+        // Кнопка удаления
         document.getElementById('btn-delete-part').onclick = async () => {
           if (confirm('Вы уверены, что хотите удалить эту деталь?')) {
             await deleteItem('parts', id);
@@ -672,15 +741,78 @@ const screens = {
             location.hash = '#/data';
           }
         };
+
+        // КНОПКА "ДОБАВИТЬ В ЗАДАНИЕ" ИЗ КАРТОЧКИ ДЕТАЛИ
+        document.getElementById('btn-add-task-from-part').onclick = () => {
+          const allowedMachines = state.machines.filter(m => part.machineIds?.includes(m.id)).sort((a,b)=>a.order-b.order);
+          
+          if (allowedMachines.length === 0) {
+            showToast('У детали не указаны станки. Отредактируйте карточку.');
+            return;
+          }
+
+          const mOpts = allowedMachines.map(m => `<option value="${m.id}">${m.number}. ${m.model}</option>`).join('');
+
+          openModal('Добавить в задание', `
+            <div style="margin-bottom:15px; font-size:15px;">
+              Деталь: <strong>${part.name}</strong>
+            </div>
+            <div class="form-group">
+              <label>Станок</label>
+              <select name="machineId">${mOpts}</select>
+            </div>
+            <div class="form-group">
+              <label>Номер заказа (NN.NN)</label>
+              <input type="text" name="orderNo" placeholder="69.27">
+            </div>
+            <div class="form-group">
+              <label>Количество</label>
+              <input type="number" name="total" value="1">
+            </div>
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="isUrgent"> 🚨 Срочная задача
+              </label>
+            </div>
+          `, 'Добавить', async (overlay) => {
+            const form = overlay.querySelector('form');
+            const { value: orderNo, warning } = normalizeOrderNo(form.orderNo.value);
+            if (warning) showToast(`Внимание: ${warning}`);
+            
+            const machineId = form.machineId.value;
+            const total = parseInt(form.total.value, 10);
+            const isUrgent = form.isUrgent.checked;
+
+            if (!orderNo) { showToast('Введите номер заказа'); return false; }
+            if (isNaN(total) || total < 1) { showToast('Количество должно быть больше 0'); return false; }
+
+            // Получаем текущие задачи для выбранного станка, чтобы определить позицию
+            const currentMachineTasks = await getTasksByMachine(machineId);
+            const isDuplicate = currentMachineTasks.some(t => t.orderNo === orderNo && t.partName.toLowerCase() === part.name.toLowerCase());
+            
+            if (isDuplicate) {
+              if (!confirm(`Задача "${part.name}" по заказу ${orderNo} уже есть на этом станке. Всё равно добавить?`)) return false;
+            }
+
+            const newTask = { 
+              id: 'task_' + Date.now(), machineId: machineId, pos: currentMachineTasks.length + 1, 
+              orderNo, partName: part.name, total, done: 0, isUrgent, note: '',
+              partId: part.id, // Автоматически привязываем ID
+              createdAt: new Date().toISOString() 
+            };
+            await put('tasks', newTask);
+            showToast(`Задача добавлена на станок`);
+            location.hash = '#/data'; // Или можно перейти на станок
+            return true;
+          });
+        };
         return;
       }
 
-      // Логика редактирования
+      // Логика редактирования (сокращена, идентична v28)
       let newPhotoBase64 = null;
-      const part = isNew ? { toolingIds: [], machineIds: [] } : state.parts.find(p => p.id === id);
       let currentToolingIds = part.toolingIds ? [...part.toolingIds] : [];
 
-      // Загрузка фото
       document.getElementById('btn-upload-part-photo').onclick = () => {
         document.getElementById('part-photo-input').click();
       };
@@ -691,91 +823,55 @@ const screens = {
           showToast('Обработка фото...');
           newPhotoBase64 = await compressImage(file);
           const imgEl = document.getElementById('photo-img');
-          if (imgEl.tagName === 'IMG') {
-            imgEl.src = newPhotoBase64;
-          } else {
+          if (imgEl.tagName === 'IMG') { imgEl.src = newPhotoBase64; } 
+          else {
             const newImg = document.createElement('img');
-            newImg.src = newPhotoBase64;
-            newImg.className = 'photo-preview';
-            newImg.id = 'photo-img';
+            newImg.src = newPhotoBase64; newImg.className = 'photo-preview'; newImg.id = 'photo-img';
             imgEl.replaceWith(newImg);
           }
-        } catch (err) {
-          showToast('Ошибка загрузки фото');
-        }
+        } catch (err) { showToast('Ошибка загрузки фото'); }
       };
 
-      // Чекбоксы станков
       document.querySelectorAll('#part-machines .tag-checkbox').forEach(cb => {
-        cb.onchange = () => {
-          cb.parentElement.classList.toggle('active', cb.checked);
-        };
+        cb.onchange = () => { cb.parentElement.classList.toggle('active', cb.checked); };
       });
 
-      // Выпадающие списки оснастки
       const renderToolingSelects = () => {
         const container = document.getElementById('tooling-selects');
         let html = '';
-        
         currentToolingIds.forEach((tid, index) => {
           const opts = state.toolings.map(t => `<option value="${t.id}" ${t.id === tid ? 'selected' : ''}>${t.code}</option>`).join('');
-          html += `
-            <div style="display:flex; gap:8px; margin-bottom:8px;">
+          html += `<div style="display:flex; gap:8px; margin-bottom:8px;">
               <select class="tooling-select" data-index="${index}" style="flex:1; padding:12px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); font-size:16px;">${opts}</select>
               <button type="button" class="btn btn-secondary btn-remove-tooling" data-index="${index}" style="flex:0; padding:0 15px; color:var(--danger); font-size:20px;">✕</button>
-            </div>
-          `;
+            </div>`;
         });
-
         const allOpts = state.toolings.map(t => `<option value="${t.id}">${t.code}</option>`).join('');
-        html += `
-          <div style="display:flex; gap:8px; margin-bottom:8px;">
+        html += `<div style="display:flex; gap:8px; margin-bottom:8px;">
             <select id="add-tooling-select" style="flex:1; padding:12px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); font-size:16px;">
-              <option value="">+ Добавить оснастку...</option>
-              ${allOpts}
-            </select>
-          </div>
-        `;
+              <option value="">+ Добавить оснастку...</option>${allOpts}
+            </select></div>`;
         container.innerHTML = html;
 
         container.querySelectorAll('.tooling-select').forEach(sel => {
-          sel.onchange = (e) => {
-            const idx = parseInt(sel.dataset.index);
-            currentToolingIds[idx] = e.target.value;
-          };
+          sel.onchange = (e) => { currentToolingIds[parseInt(sel.dataset.index)] = e.target.value; };
         });
         container.querySelectorAll('.btn-remove-tooling').forEach(btn => {
-          btn.onclick = () => {
-            const idx = parseInt(btn.dataset.index);
-            currentToolingIds.splice(idx, 1);
-            renderToolingSelects();
-          };
+          btn.onclick = () => { currentToolingIds.splice(parseInt(btn.dataset.index), 1); renderToolingSelects(); };
         });
         const addSel = document.getElementById('add-tooling-select');
-        if (addSel) {
-          addSel.onchange = (e) => {
-            if (e.target.value) {
-              currentToolingIds.push(e.target.value);
-              renderToolingSelects();
-            }
-          };
-        }
+        if (addSel) addSel.onchange = (e) => { if (e.target.value) { currentToolingIds.push(e.target.value); renderToolingSelects(); } };
       };
       renderToolingSelects();
 
-      // Сохранение
       document.getElementById('btn-save-part').onclick = async () => {
         const name = document.getElementById('part-name').value.trim();
         if (!name) { showToast('Введите название детали'); return; }
-
         const machineIds = Array.from(document.querySelectorAll('#part-machines .tag-checkbox:checked')).map(cb => cb.value);
         const note = document.getElementById('part-note').value.trim();
-
         let finalPhoto = isNew ? '' : (state.parts.find(p => p.id === id)?.photo || '');
         if (newPhotoBase64 !== null) finalPhoto = newPhotoBase64;
-
         const partId = isNew ? 'part_' + Date.now() : id;
-        
         await put('parts', { id: partId, name, note, toolingIds: currentToolingIds, machineIds, photo: finalPhoto });
         showToast('Деталь сохранена');
         location.hash = '#/data';
@@ -791,7 +887,6 @@ const screens = {
       if (!tool) return '<div class="placeholder">Оснастка не найдена</div>';
 
       if (!isEdit) {
-        // РЕЖИМ ПРОСМОТРА
         return `
           <div class="card" style="margin-top:0;">
             ${tool.photo ? `<img src="${tool.photo}" class="photo-preview">` : '<div class="photo-preview" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted)">Нет фото</div>'}
@@ -812,7 +907,6 @@ const screens = {
         `;
       }
 
-      // РЕЖИМ РЕДАКТИРОВАНИЯ
       return `
         <div class="card" style="margin-top:0;">
           <div class="form-group">
@@ -846,7 +940,6 @@ const screens = {
       const isEdit = action === 'edit' || isNew;
 
       if (!isEdit) {
-        // Обработчик удаления в режиме просмотра
         document.getElementById('btn-delete-tool').onclick = async () => {
           if (confirm('Вы уверены, что хотите удалить эту оснастку?')) {
             await deleteItem('toolings', id);
@@ -870,32 +963,23 @@ const screens = {
           showToast('Обработка фото...');
           newPhotoBase64 = await compressImage(file);
           const imgEl = document.getElementById('photo-img');
-          if (imgEl.tagName === 'IMG') {
-            imgEl.src = newPhotoBase64;
-          } else {
+          if (imgEl.tagName === 'IMG') { imgEl.src = newPhotoBase64; } 
+          else {
             const newImg = document.createElement('img');
-            newImg.src = newPhotoBase64;
-            newImg.className = 'photo-preview';
-            newImg.id = 'photo-img';
+            newImg.src = newPhotoBase64; newImg.className = 'photo-preview'; newImg.id = 'photo-img';
             imgEl.replaceWith(newImg);
           }
-        } catch (err) {
-          showToast('Ошибка загрузки фото');
-        }
+        } catch (err) { showToast('Ошибка загрузки фото'); }
       };
 
       document.getElementById('btn-save-tool').onclick = async () => {
         const code = document.getElementById('tool-code').value.trim();
         if (!code) { showToast('Введите шифр оснастки'); return; }
-
         const name = document.getElementById('tool-name').value.trim();
         const note = document.getElementById('tool-note').value.trim();
-        
         let finalPhoto = isNew ? '' : (state.toolings.find(t => t.id === id)?.photo || '');
         if (newPhotoBase64 !== null) finalPhoto = newPhotoBase64;
-
         const toolId = isNew ? 'tool_' + Date.now() : id;
-        
         await put('toolings', { id: toolId, code, name, note, photo: finalPhoto });
         showToast('Оснастка сохранена');
         location.hash = '#/data';
@@ -919,44 +1003,27 @@ const screens = {
     },
     afterRender: () => {
       const list = document.getElementById('history-list');
-      
       const renderList = () => {
         let filtered = state.history.filter(h => h.status === 'active');
         if (state.historyStartDate) filtered = filtered.filter(h => h.eventDate >= state.historyStartDate);
         if (state.historyEndDate) filtered = filtered.filter(h => h.eventDate <= state.historyEndDate);
         filtered.sort((a,b) => new Date(b.eventDate) - new Date(a.eventDate));
-
         if (filtered.length === 0) { list.innerHTML = '<div class="placeholder">История пуста</div>'; return; }
-
         list.innerHTML = filtered.map(h => {
           const isCancel = h.type === 'cancel';
           return `
             <div class="history-card">
-              <div class="history-header">
-                <span>${h.eventDate} · ${h.machineSnapshot}</span>
-                <span style="color:var(--accent); font-weight:600">Заказ ${h.orderNo}</span>
-              </div>
+              <div class="history-header"><span>${h.eventDate} · ${h.machineSnapshot}</span><span style="color:var(--accent); font-weight:600">Заказ ${h.orderNo}</span></div>
               <div class="history-part">${h.partName} ${h.isUrgent ? '🚨' : ''}</div>
-              <div class="history-qty ${isCancel ? 'cancel' : ''}">
-                ${isCancel ? '✕ Отменено (остаток ' + h.qty + ')' : '✓ Сделано ' + h.qty + ' из ' + h.total}
-              </div>
+              <div class="history-qty ${isCancel ? 'cancel' : ''}">${isCancel ? '✕ Отменено (остаток ' + h.qty + ')' : '✓ Сделано ' + h.qty + ' из ' + h.total}</div>
               ${h.note ? `<div style="font-size:13px; font-style:italic; color:var(--text-muted); margin-top:4px;">📝 ${h.note}</div>` : ''}
-              <div class="history-actions">
-                <button class="btn-small btn-return" data-id="${h.id}">
-                  ${isCancel ? 'Возобновить в очередь' : 'Вернуть в очередь'}
-                </button>
-              </div>
-            </div>
-          `;
+              <div class="history-actions"><button class="btn-small btn-return" data-id="${h.id}">${isCancel ? 'Возобновить' : 'Вернуть'}</button></div>
+            </div>`;
         }).join('');
-
         document.querySelectorAll('.btn-return').forEach(btn => {
-          btn.onclick = () => {
-            showToast('Функция возврата в разработке для v28');
-          };
+          btn.onclick = () => showToast('Функция возврата в разработке для v29');
         });
       };
-
       document.getElementById('hist-start').onchange = (e) => { state.historyStartDate = e.target.value; renderList(); };
       document.getElementById('hist-end').onchange = (e) => { state.historyEndDate = e.target.value; renderList(); };
       document.getElementById('btn-all-history').onclick = () => {
@@ -985,15 +1052,98 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.4 · Фото и удаление</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 2.5 · Связь справочников</div>
       `;
     },
     afterRender: () => {
       document.querySelectorAll('input[name="theme"]').forEach((r) => {
         r.addEventListener('change', () => { localStorage.setItem('theme', r.value); applyTheme(); });
       });
-      document.getElementById('btn-export-excel').onclick = () => showToast('Экспорт обновится на следующем шаге');
-      document.getElementById('btn-backup').onclick = () => showToast('Бэкап обновится на следующем шаге');
+
+      // ОБНОВЛЕННЫЙ ЭКСПОРТ (Включает справочники)
+      document.getElementById('btn-export-excel').onclick = () => {
+        if (typeof XLSX === 'undefined') { showToast('Ошибка: библиотека Excel не загрузилась'); return; }
+        const wb = XLSX.utils.book_new();
+        const historyActive = state.history.filter(h => h.status === 'active');
+
+        const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего', 'Срочно', 'Заметка']];
+        historyActive.filter(h => h.type === 'done').forEach(h => {
+          wsDoneData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.total, h.isUrgent ? 'Да' : '', h.note || '']);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsDoneData), 'Выполнено');
+
+        const wsCancelData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Остаток', 'Заметка']];
+        historyActive.filter(h => h.type === 'cancel').forEach(h => {
+          wsCancelData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.note || '']);
+        });
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsCancelData), 'Отменено');
+
+        // Выгрузка Деталей
+        const wsParts = [['Название', 'Заметка', 'Оснастка (ID)', 'Станки (ID)']];
+        state.parts.forEach(p => wsParts.push([p.name, p.note || '', (p.toolingIds||[]).join(', '), (p.machineIds||[]).join(', ')]));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsParts), 'Справочник деталей');
+
+        // Выгрузка Оснастки
+        const wsTools = [['Шифр', 'Название', 'Заметка']];
+        state.toolings.forEach(t => wsTools.push([t.code, t.name || '', t.note || '']));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsTools), 'Справочник оснастки');
+
+        XLSX.writeFile(wb, `Отчет_${formatDate(new Date())}.xlsx`);
+      };
+
+      // ОБНОВЛЕННЫЙ БЭКАП
+      document.getElementById('btn-backup').onclick = async () => {
+        const data = {
+          version: 2, exportDate: new Date().toISOString(),
+          machines: state.machines, tasks: state.allTasks, history: state.history,
+          parts: state.parts, toolings: state.toolings // Добавили справочники
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `backup_${formatDate(new Date())}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('Копия сохранена');
+      };
+
+      const fileInput = document.getElementById('file-restore');
+      document.getElementById('btn-restore').onclick = () => fileInput.click();
+      
+      // ОБНОВЛЕННЫЙ ИМПОРТ
+      fileInput.onchange = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          try {
+            const data = JSON.parse(ev.target.result);
+            if (!data.machines || !data.tasks || !data.history) throw new Error('Неверный формат файла');
+            if (!confirm('ВНИМАНИЕ! Все текущие данные будут заменены данными из файла. Продолжить?')) return;
+
+            const db = await openDB();
+            const tx = db.transaction(['machines', 'tasks', 'history', 'parts', 'toolings'], 'readwrite');
+            tx.objectStore('machines').clear();
+            tx.objectStore('tasks').clear();
+            tx.objectStore('history').clear();
+            tx.objectStore('parts').clear();
+            tx.objectStore('toolings').clear();
+            
+            data.machines.forEach(m => tx.objectStore('machines').put(m));
+            data.tasks.forEach(t => tx.objectStore('tasks').put(t));
+            data.history.forEach(h => tx.objectStore('history').put(h));
+            if (data.parts) data.parts.forEach(p => tx.objectStore('parts').put(p));
+            if (data.toolings) data.toolings.forEach(t => tx.objectStore('toolings').put(t));
+            
+            tx.oncomplete = async () => {
+              showToast('Данные успешно восстановлены');
+              render();
+            };
+          } catch (err) { alert('Ошибка чтения файла: ' + err.message); }
+        };
+        reader.readAsText(file);
+      };
     }
   }
 };
