@@ -580,11 +580,43 @@ const screens = {
   },
   part: {
     title: 'Деталь',
-    render: (id) => {
+    render: (id, action) => {
       const isNew = id === 'new';
+      const isEdit = action === 'edit' || isNew;
       const part = isNew ? { name: '', note: '', toolingIds: [], machineIds: [] } : state.parts.find(p => p.id === id);
       if (!part) return '<div class="placeholder">Деталь не найдена</div>';
 
+      if (!isEdit) {
+        // РЕЖИМ ПРОСМОТРА
+        const tNames = (part.toolingIds || []).map(tid => state.toolings.find(t => t.id === tid)?.code).filter(Boolean).join(', ');
+        const mNames = (part.machineIds || []).map(mid => {
+          const m = state.machines.find(x => x.id === mid);
+          return m ? `${m.number}. ${m.model}` : null;
+        }).filter(Boolean).join(', ');
+        
+        return `
+          <div class="card" style="margin-top:0;">
+            <h2 style="margin-bottom:16px;">${part.name}</h2>
+            <div class="form-group">
+              <label>Заметка</label>
+              <div style="padding:12px; background:var(--bg); border-radius:8px; min-height:44px;">${part.note || '<span style="color:var(--text-muted)">Нет</span>'}</div>
+            </div>
+            <div class="form-group">
+              <label>Оснастка</label>
+              <div style="padding:12px; background:var(--bg); border-radius:8px; min-height:44px;">${tNames || '<span style="color:var(--text-muted)">Не привязана</span>'}</div>
+            </div>
+            <div class="form-group">
+              <label>Станки, где делали</label>
+              <div style="padding:12px; background:var(--bg); border-radius:8px; min-height:44px;">${mNames || '<span style="color:var(--text-muted)">Нет</span>'}</div>
+            </div>
+            <div class="modal-actions" style="margin-top:20px;">
+              <button type="button" class="btn btn-primary" onclick="location.hash='#/part/${part.id}/edit'">✏️ Редактировать</button>
+            </div>
+          </div>
+        `;
+      }
+
+      // РЕЖИМ РЕДАКТИРОВАНИЯ
       return `
         <div class="card" style="margin-top:0;">
           <div class="form-group">
@@ -597,14 +629,7 @@ const screens = {
           </div>
 
           <h3 style="margin-top:20px;">Привязанная оснастка</h3>
-          <div class="tags-container" id="part-toolings">
-            ${state.toolings.map(t => `
-              <label class="tag ${part.toolingIds?.includes(t.id) ? 'active' : ''}">
-                <input type="checkbox" class="tag-checkbox" value="${t.id}" ${part.toolingIds?.includes(t.id) ? 'checked' : ''}>
-                ${t.code}
-              </label>
-            `).join('') || '<span style="color:var(--text-muted); font-size:14px;">Сначала добавьте оснастку в справочник</span>'}
-          </div>
+          <div id="tooling-selects"></div>
 
           <h3 style="margin-top:20px;">Станки, где делали</h3>
           <div class="tags-container" id="part-machines">
@@ -617,30 +642,88 @@ const screens = {
           </div>
 
           <div class="modal-actions" style="margin-top:30px;">
+            <button type="button" class="btn btn-secondary" onclick="location.hash='${isNew ? '#/data' : '#/part/'+id}'">Отмена</button>
             <button type="button" class="btn btn-primary" id="btn-save-part">Сохранить</button>
           </div>
         </div>
       `;
     },
-    afterRender: (id) => {
-      document.querySelectorAll('.tag-checkbox').forEach(cb => {
+    afterRender: (id, action) => {
+      const isNew = id === 'new';
+      const isEdit = action === 'edit' || isNew;
+      if (!isEdit) return;
+
+      // Логика чекбоксов станков
+      document.querySelectorAll('#part-machines .tag-checkbox').forEach(cb => {
         cb.onchange = () => {
           cb.parentElement.classList.toggle('active', cb.checked);
         };
       });
 
+      // Логика выпадающих списков оснастки
+      const part = isNew ? { toolingIds: [] } : state.parts.find(p => p.id === id);
+      let currentToolingIds = part.toolingIds ? [...part.toolingIds] : [];
+
+      const renderToolingSelects = () => {
+        const container = document.getElementById('tooling-selects');
+        let html = '';
+        
+        currentToolingIds.forEach((tid, index) => {
+          const opts = state.toolings.map(t => `<option value="${t.id}" ${t.id === tid ? 'selected' : ''}>${t.code}</option>`).join('');
+          html += `
+            <div style="display:flex; gap:8px; margin-bottom:8px;">
+              <select class="tooling-select" data-index="${index}" style="flex:1; padding:12px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); font-size:16px;">${opts}</select>
+              <button type="button" class="btn btn-secondary btn-remove-tooling" data-index="${index}" style="flex:0; padding:0 15px; color:var(--danger); font-size:20px;">✕</button>
+            </div>
+          `;
+        });
+
+        const allOpts = state.toolings.map(t => `<option value="${t.id}">${t.code}</option>`).join('');
+        html += `
+          <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <select id="add-tooling-select" style="flex:1; padding:12px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); font-size:16px;">
+              <option value="">+ Добавить оснастку...</option>
+              ${allOpts}
+            </select>
+          </div>
+        `;
+        container.innerHTML = html;
+
+        container.querySelectorAll('.tooling-select').forEach(sel => {
+          sel.onchange = (e) => {
+            const idx = parseInt(sel.dataset.index);
+            currentToolingIds[idx] = e.target.value;
+          };
+        });
+        container.querySelectorAll('.btn-remove-tooling').forEach(btn => {
+          btn.onclick = () => {
+            const idx = parseInt(btn.dataset.index);
+            currentToolingIds.splice(idx, 1);
+            renderToolingSelects();
+          };
+        });
+        const addSel = document.getElementById('add-tooling-select');
+        if (addSel) {
+          addSel.onchange = (e) => {
+            if (e.target.value) {
+              currentToolingIds.push(e.target.value);
+              renderToolingSelects();
+            }
+          };
+        }
+      };
+      renderToolingSelects();
+
       document.getElementById('btn-save-part').onclick = async () => {
         const name = document.getElementById('part-name').value.trim();
         if (!name) { showToast('Введите название детали'); return; }
 
-        const toolingIds = Array.from(document.querySelectorAll('#part-toolings .tag-checkbox:checked')).map(cb => cb.value);
         const machineIds = Array.from(document.querySelectorAll('#part-machines .tag-checkbox:checked')).map(cb => cb.value);
         const note = document.getElementById('part-note').value.trim();
 
-        const isNew = id === 'new';
         const partId = isNew ? 'part_' + Date.now() : id;
         
-        await put('parts', { id: partId, name, note, toolingIds, machineIds });
+        await put('parts', { id: partId, name, note, toolingIds: currentToolingIds, machineIds });
         showToast('Деталь сохранена');
         location.hash = '#/data';
       };
@@ -648,18 +731,41 @@ const screens = {
   },
   tooling: {
     title: 'Оснастка',
-    render: (id) => {
+    render: (id, action) => {
       const isNew = id === 'new';
+      const isEdit = action === 'edit' || isNew;
       const tool = isNew ? { code: '', name: '', note: '', photo: '' } : state.toolings.find(t => t.id === id);
       if (!tool) return '<div class="placeholder">Оснастка не найдена</div>';
 
+      if (!isEdit) {
+        // РЕЖИМ ПРОСМОТРА
+        return `
+          <div class="card" style="margin-top:0;">
+            ${tool.photo ? `<img src="${tool.photo}" class="photo-preview">` : '<div class="photo-preview" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted)">Нет фото</div>'}
+            <h2 style="margin-bottom:16px;">${tool.code}</h2>
+            <div class="form-group">
+              <label>Название</label>
+              <div style="padding:12px; background:var(--bg); border-radius:8px;">${tool.name || '<span style="color:var(--text-muted)">Нет</span>'}</div>
+            </div>
+            <div class="form-group">
+              <label>Заметка</label>
+              <div style="padding:12px; background:var(--bg); border-radius:8px; min-height:44px;">${tool.note || '<span style="color:var(--text-muted)">Нет</span>'}</div>
+            </div>
+            <div class="modal-actions" style="margin-top:20px;">
+              <button type="button" class="btn btn-primary" onclick="location.hash='#/tooling/${tool.id}/edit'">✏️ Редактировать</button>
+            </div>
+          </div>
+        `;
+      }
+
+      // РЕЖИМ РЕДАКТИРОВАНИЯ
       return `
         <div class="card" style="margin-top:0;">
           <div class="form-group">
             <label>Фото</label>
             ${tool.photo ? `<img src="${tool.photo}" class="photo-preview" id="photo-img">` : `<div class="photo-preview" id="photo-img" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted)">Нет фото</div>`}
-            <input type="file" id="tool-photo-input" accept="image/*" capture="environment" style="display:none;">
-            <button type="button" class="btn btn-secondary" id="btn-upload-photo" style="margin-top:10px;">Сделать фото / Загрузить</button>
+            <input type="file" id="tool-photo-input" accept="image/*" style="display:none;">
+            <button type="button" class="btn btn-secondary" id="btn-upload-photo" style="margin-top:10px;">Выбрать фото / Сделать снимок</button>
           </div>
           <div class="form-group">
             <label>Шифр оснастки *</label>
@@ -675,14 +781,18 @@ const screens = {
           </div>
 
           <div class="modal-actions" style="margin-top:30px;">
+            <button type="button" class="btn btn-secondary" onclick="location.hash='${isNew ? '#/data' : '#/tooling/'+id}'">Отмена</button>
             <button type="button" class="btn btn-primary" id="btn-save-tool">Сохранить</button>
           </div>
         </div>
       `;
     },
-    afterRender: (id) => {
-      let newPhotoBase64 = null;
+    afterRender: (id, action) => {
       const isNew = id === 'new';
+      const isEdit = action === 'edit' || isNew;
+      if (!isEdit) return;
+
+      let newPhotoBase64 = null;
 
       document.getElementById('btn-upload-photo').onclick = () => {
         document.getElementById('tool-photo-input').click();
@@ -777,7 +887,7 @@ const screens = {
 
         document.querySelectorAll('.btn-return').forEach(btn => {
           btn.onclick = () => {
-            showToast('Функция возврата в разработке для v26');
+            showToast('Функция возврата в разработке для v27');
           };
         });
       };
@@ -810,7 +920,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.2 · Справочники</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 2.3 · Карточки</div>
       `;
     },
     afterRender: () => {
@@ -831,9 +941,11 @@ window.switchDataTab = (tab) => {
 // ---- Роутинг ----
 async function render() {
   const hash = location.hash || '#/overview';
-  const m = hash.match(/^#\/(\w+)(?:\/(.+))?/);
+  // Добавлен захват третьего параметра (edit)
+  const m = hash.match(/^#\/(\w+)(?:\/([^\/]+))?(?:\/(edit))?/);
   const route = m ? m[1] : 'overview';
   const param = m ? m[2] : null;
+  const action = m ? m[3] : null;
 
   state.machines = await getAll('machines');
   state.allTasks = await getAll('tasks');
@@ -846,7 +958,10 @@ async function render() {
     btnBack.style.display = 'block';
     btnBack.onclick = () => {
       if (route === 'machine') history.replaceState(null, '', '#/machines');
-      else history.replaceState(null, '', '#/data');
+      else {
+        if (action === 'edit') history.replaceState(null, '', `#/${route}/${param}`);
+        else history.replaceState(null, '', '#/data');
+      }
       render();
     };
     document.getElementById('tabbar').style.display = 'none';
@@ -855,7 +970,6 @@ async function render() {
     document.getElementById('tabbar').style.display = 'flex';
   }
 
-  // ИСПРАВЛЕНО: Убрано двойное объявление переменной screen
   if (route === 'machine' && param) {
     state.currentMachineTasks = await getTasksByMachine(param);
     const machine = state.machines.find(x => x.id === param);
@@ -872,13 +986,13 @@ async function render() {
   }
 
   const screen = screens[route] || screens.overview;
-  document.getElementById('app-main').innerHTML = screen.render(param);
+  document.getElementById('app-main').innerHTML = screen.render(param, action);
   
   document.querySelectorAll('#tabbar a').forEach((a) => {
     a.classList.toggle('active', a.dataset.tab === route || ((route === 'machine') && a.dataset.tab === 'machines') || ((route === 'part' || route === 'tooling') && a.dataset.tab === 'data'));
   });
 
-  if (typeof screen.afterRender === 'function') screen.afterRender(param);
+  if (typeof screen.afterRender === 'function') screen.afterRender(param, action);
 }
 
 window.addEventListener('hashchange', render);
