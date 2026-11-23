@@ -487,9 +487,12 @@ const screens = {
             ${list.length === 0 ? '<div class="placeholder">Справочник пуст</div>' : ''}
             ${list.map(p => `
               <div class="list-item" onclick="location.hash='#/part/${p.id}'">
-                <div>
-                  <div class="list-item-title">${p.name}</div>
-                  <div class="list-item-subtitle">Оснасток: ${p.toolingIds?.length || 0} · Станков: ${p.machineIds?.length || 0}</div>
+                <div style="display:flex; align-items:center; gap:12px;">
+                  ${p.photo ? `<img src="${p.photo}" style="width:40px; height:40px; object-fit:cover; border-radius:6px;">` : '<div style="width:40px; height:40px; background:var(--border); border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--text-muted);">Нет фото</div>'}
+                  <div>
+                    <div class="list-item-title">${p.name}</div>
+                    <div class="list-item-subtitle">Оснасток: ${p.toolingIds?.length || 0} · Станков: ${p.machineIds?.length || 0}</div>
+                  </div>
                 </div>
                 <div>›</div>
               </div>
@@ -583,7 +586,7 @@ const screens = {
     render: (id, action) => {
       const isNew = id === 'new';
       const isEdit = action === 'edit' || isNew;
-      const part = isNew ? { name: '', note: '', toolingIds: [], machineIds: [] } : state.parts.find(p => p.id === id);
+      const part = isNew ? { name: '', note: '', toolingIds: [], machineIds: [], photo: '' } : state.parts.find(p => p.id === id);
       if (!part) return '<div class="placeholder">Деталь не найдена</div>';
 
       if (!isEdit) {
@@ -596,6 +599,7 @@ const screens = {
         
         return `
           <div class="card" style="margin-top:0;">
+            ${part.photo ? `<img src="${part.photo}" class="photo-preview">` : ''}
             <h2 style="margin-bottom:16px;">${part.name}</h2>
             <div class="form-group">
               <label>Заметка</label>
@@ -611,6 +615,7 @@ const screens = {
             </div>
             <div class="modal-actions" style="margin-top:20px;">
               <button type="button" class="btn btn-primary" onclick="location.hash='#/part/${part.id}/edit'">✏️ Редактировать</button>
+              <button type="button" class="btn" id="btn-delete-part" style="background:var(--danger); color:#fff;">Удалить</button>
             </div>
           </div>
         `;
@@ -619,6 +624,12 @@ const screens = {
       // РЕЖИМ РЕДАКТИРОВАНИЯ
       return `
         <div class="card" style="margin-top:0;">
+          <div class="form-group">
+            <label>Фото детали</label>
+            ${part.photo ? `<img src="${part.photo}" class="photo-preview" id="photo-img">` : `<div class="photo-preview" id="photo-img" style="display:flex;align-items:center;justify-content:center;color:var(--text-muted)">Нет фото</div>`}
+            <input type="file" id="part-photo-input" accept="image/*" style="display:none;">
+            <button type="button" class="btn btn-secondary" id="btn-upload-part-photo" style="margin-top:10px;">Выбрать фото / Сделать снимок</button>
+          </div>
           <div class="form-group">
             <label>Название детали *</label>
             <input type="text" id="part-name" value="${part.name}" placeholder="Вал 80-300 (Токарная)">
@@ -651,19 +662,57 @@ const screens = {
     afterRender: (id, action) => {
       const isNew = id === 'new';
       const isEdit = action === 'edit' || isNew;
-      if (!isEdit) return;
 
-      // Логика чекбоксов станков
+      if (!isEdit) {
+        // Обработчик удаления в режиме просмотра
+        document.getElementById('btn-delete-part').onclick = async () => {
+          if (confirm('Вы уверены, что хотите удалить эту деталь?')) {
+            await deleteItem('parts', id);
+            showToast('Деталь удалена');
+            location.hash = '#/data';
+          }
+        };
+        return;
+      }
+
+      // Логика редактирования
+      let newPhotoBase64 = null;
+      const part = isNew ? { toolingIds: [], machineIds: [] } : state.parts.find(p => p.id === id);
+      let currentToolingIds = part.toolingIds ? [...part.toolingIds] : [];
+
+      // Загрузка фото
+      document.getElementById('btn-upload-part-photo').onclick = () => {
+        document.getElementById('part-photo-input').click();
+      };
+      document.getElementById('part-photo-input').onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        try {
+          showToast('Обработка фото...');
+          newPhotoBase64 = await compressImage(file);
+          const imgEl = document.getElementById('photo-img');
+          if (imgEl.tagName === 'IMG') {
+            imgEl.src = newPhotoBase64;
+          } else {
+            const newImg = document.createElement('img');
+            newImg.src = newPhotoBase64;
+            newImg.className = 'photo-preview';
+            newImg.id = 'photo-img';
+            imgEl.replaceWith(newImg);
+          }
+        } catch (err) {
+          showToast('Ошибка загрузки фото');
+        }
+      };
+
+      // Чекбоксы станков
       document.querySelectorAll('#part-machines .tag-checkbox').forEach(cb => {
         cb.onchange = () => {
           cb.parentElement.classList.toggle('active', cb.checked);
         };
       });
 
-      // Логика выпадающих списков оснастки
-      const part = isNew ? { toolingIds: [] } : state.parts.find(p => p.id === id);
-      let currentToolingIds = part.toolingIds ? [...part.toolingIds] : [];
-
+      // Выпадающие списки оснастки
       const renderToolingSelects = () => {
         const container = document.getElementById('tooling-selects');
         let html = '';
@@ -714,6 +763,7 @@ const screens = {
       };
       renderToolingSelects();
 
+      // Сохранение
       document.getElementById('btn-save-part').onclick = async () => {
         const name = document.getElementById('part-name').value.trim();
         if (!name) { showToast('Введите название детали'); return; }
@@ -721,9 +771,12 @@ const screens = {
         const machineIds = Array.from(document.querySelectorAll('#part-machines .tag-checkbox:checked')).map(cb => cb.value);
         const note = document.getElementById('part-note').value.trim();
 
+        let finalPhoto = isNew ? '' : (state.parts.find(p => p.id === id)?.photo || '');
+        if (newPhotoBase64 !== null) finalPhoto = newPhotoBase64;
+
         const partId = isNew ? 'part_' + Date.now() : id;
         
-        await put('parts', { id: partId, name, note, toolingIds: currentToolingIds, machineIds });
+        await put('parts', { id: partId, name, note, toolingIds: currentToolingIds, machineIds, photo: finalPhoto });
         showToast('Деталь сохранена');
         location.hash = '#/data';
       };
@@ -753,6 +806,7 @@ const screens = {
             </div>
             <div class="modal-actions" style="margin-top:20px;">
               <button type="button" class="btn btn-primary" onclick="location.hash='#/tooling/${tool.id}/edit'">✏️ Редактировать</button>
+              <button type="button" class="btn" id="btn-delete-tool" style="background:var(--danger); color:#fff;">Удалить</button>
             </div>
           </div>
         `;
@@ -790,7 +844,18 @@ const screens = {
     afterRender: (id, action) => {
       const isNew = id === 'new';
       const isEdit = action === 'edit' || isNew;
-      if (!isEdit) return;
+
+      if (!isEdit) {
+        // Обработчик удаления в режиме просмотра
+        document.getElementById('btn-delete-tool').onclick = async () => {
+          if (confirm('Вы уверены, что хотите удалить эту оснастку?')) {
+            await deleteItem('toolings', id);
+            showToast('Оснастка удалена');
+            location.hash = '#/data';
+          }
+        };
+        return;
+      }
 
       let newPhotoBase64 = null;
 
@@ -826,7 +891,7 @@ const screens = {
         const name = document.getElementById('tool-name').value.trim();
         const note = document.getElementById('tool-note').value.trim();
         
-        let finalPhoto = isNew ? '' : state.toolings.find(t => t.id === id).photo;
+        let finalPhoto = isNew ? '' : (state.toolings.find(t => t.id === id)?.photo || '');
         if (newPhotoBase64 !== null) finalPhoto = newPhotoBase64;
 
         const toolId = isNew ? 'tool_' + Date.now() : id;
@@ -887,7 +952,7 @@ const screens = {
 
         document.querySelectorAll('.btn-return').forEach(btn => {
           btn.onclick = () => {
-            showToast('Функция возврата в разработке для v27');
+            showToast('Функция возврата в разработке для v28');
           };
         });
       };
@@ -920,7 +985,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.3 · Карточки</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 2.4 · Фото и удаление</div>
       `;
     },
     afterRender: () => {
@@ -941,7 +1006,6 @@ window.switchDataTab = (tab) => {
 // ---- Роутинг ----
 async function render() {
   const hash = location.hash || '#/overview';
-  // Добавлен захват третьего параметра (edit)
   const m = hash.match(/^#\/(\w+)(?:\/([^\/]+))?(?:\/(edit))?/);
   const route = m ? m[1] : 'overview';
   const param = m ? m[2] : null;
