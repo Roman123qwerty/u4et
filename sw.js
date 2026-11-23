@@ -1,4 +1,4 @@
-const CACHE = 'uchet-v29';
+const CACHE = 'uchet-v30';
 const ASSETS = [
   './', './index.html', './css/style.css', 
   './js/app.js', './js/db.js', './js/xlsx.full.min.js',
