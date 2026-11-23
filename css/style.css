@@ -101,7 +101,8 @@ body {
 .task-content { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
 .task-header { display: flex; gap: 8px; font-size: 13px; color: var(--text-muted); margin-bottom: 4px; align-items: center; }
 .task-order { font-weight: 600; color: var(--accent); font-size: 14px; }
-.task-part { font-size: 17px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.task-part { font-size: 17px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); text-decoration: none; }
+.task-part.linked { color: var(--accent); text-decoration: underline; }
 .task-qty { font-size: 15px; font-weight: 600; color: var(--warn); }
 .urgent-badge { background: var(--danger); color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; }
 .task-note { font-size: 13px; color: var(--text-muted); font-style: italic; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -144,6 +145,22 @@ body {
 }
 .tag.active { background: var(--accent); color: #fff; }
 .tag-checkbox { display: none; }
+
+/* Автодополнение */
+.autocomplete-container { position: relative; }
+.autocomplete-list {
+  position: absolute; top: 100%; left: 0; right: 0;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  max-height: 200px; overflow-y: auto; z-index: 10; display: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.autocomplete-item {
+  padding: 10px 12px; cursor: pointer; border-bottom: 1px solid var(--border);
+}
+.autocomplete-item:last-child { border-bottom: none; }
+.autocomplete-item:active { background: var(--bg); }
+.autocomplete-item .ac-title { font-size: 16px; font-weight: 500; }
+.autocomplete-item .ac-sub { font-size: 13px; color: var(--text-muted); }
 
 /* --- История --- */
 .history-card {
