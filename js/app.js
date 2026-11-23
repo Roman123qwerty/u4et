@@ -196,7 +196,6 @@ const screens = {
       } else {
         state.currentMachineTasks.forEach((t, index) => {
           const remaining = t.total - t.done;
-          // Проверяем, есть ли деталь в базе для ссылки
           const partLink = t.partId ? `<a href="#/part/${t.partId}" class="task-part linked">${t.partName}</a>` : `<div class="task-part">${t.partName}</div>`;
           
           html += `
@@ -225,7 +224,7 @@ const screens = {
     afterRender: (id) => {
       // ДОБАВЛЕНИЕ ЗАДАЧИ С АВТОДОПОЛНЕНИЕМ
       document.getElementById('btn-add-task').onclick = () => {
-        let selectedPartId = null; // Сюда сохраняем ID выбранной детали
+        let selectedPartId = null;
         
         openModal('Новая задача', `
           <div class="form-group">
@@ -240,7 +239,7 @@ const screens = {
           </div>
           <div class="form-group" id="add-to-db-container" style="display:none; margin-top:-8px; margin-bottom:14px;">
             <label class="checkbox-label" style="font-size:14px; color:var(--accent);">
-              <input type="checkbox" name="addToDB"> Внести деталь в базу
+              <input type="checkbox" name="addToDB"> Создать карточку детали
             </label>
           </div>
           <div class="form-group">
@@ -270,7 +269,6 @@ const screens = {
           if (!orderNo || !partName) { showToast('Заполните номер заказа и название детали'); return false; }
           if (isNaN(total) || total < 1) { showToast('Количество должно быть больше 0'); return false; }
           
-          // Если пользователь ввел вручную и поставил галочку "Внести в базу"
           if (addToDB && !selectedPartId) {
             const newPartId = 'part_' + Date.now();
             await put('parts', { id: newPartId, name: partName, note: '', toolingIds: [], machineIds: [id], photo: '' });
@@ -284,7 +282,7 @@ const screens = {
           const newTask = { 
             id: 'task_' + Date.now(), machineId: id, pos: state.currentMachineTasks.length + 1, 
             orderNo, partName, total, done: 0, isUrgent, note,
-            partId: selectedPartId, // Привязываем ID детали (если есть)
+            partId: selectedPartId,
             createdAt: new Date().toISOString() 
           };
           await put('tasks', newTask);
@@ -292,7 +290,6 @@ const screens = {
           return true;
         });
 
-        // Логика работы выпадающего списка
         setTimeout(() => {
           const input = document.getElementById('task-part-input');
           const list = document.getElementById('autocomplete-list');
@@ -300,17 +297,15 @@ const screens = {
           const orderInput = document.querySelector('input[name="orderNo"]');
           const hint = document.getElementById('order-hint');
 
-          // Валидация заказа
           orderInput.addEventListener('input', () => {
             const { warning } = normalizeOrderNo(orderInput.value);
             hint.textContent = warning || ''; hint.style.display = warning ? 'block' : 'none';
           });
 
-          // Автодополнение
           input.addEventListener('input', () => {
             const val = input.value.toLowerCase().trim();
             list.innerHTML = '';
-            selectedPartId = null; // Сбрасываем выбор при ручном вводе
+            selectedPartId = null;
             dbContainer.style.display = 'none';
 
             if (!val) { list.style.display = 'none'; return; }
@@ -327,18 +322,16 @@ const screens = {
                   input.value = p.name;
                   selectedPartId = p.id;
                   list.style.display = 'none';
-                  dbContainer.style.display = 'none'; // Скрываем галочку, т.к. деталь уже в базе
+                  dbContainer.style.display = 'none';
                 };
                 list.appendChild(div);
               });
             } else {
               list.style.display = 'none';
-              // Если совпадений нет и это новая деталь, показываем галочку
               if (val.length > 2) dbContainer.style.display = 'block';
             }
           });
 
-          // Скрываем список при клике вне его
           input.addEventListener('blur', () => {
             setTimeout(() => { list.style.display = 'none'; }, 200);
           });
@@ -390,7 +383,7 @@ const screens = {
         };
       });
 
-      // МЕНЮ (⋯) - сокращено для читаемости, логика идентична v28
+      // МЕНЮ (⋯)
       document.querySelectorAll('.btn-menu').forEach(btn => {
         btn.onclick = () => {
           const task = state.currentMachineTasks.find(t => t.id === btn.dataset.id);
@@ -425,20 +418,14 @@ const screens = {
             const overlay = document.querySelector('.modal-overlay');
             
             overlay.querySelector('#act-urgent').onclick = async () => {
-              task.isUrgent = !task.isUrgent;
-              await put('tasks', task); overlay.remove(); render();
+              task.isUrgent = !task.isUrgent; await put('tasks', task); overlay.remove(); render();
             };
-
             overlay.querySelector('#act-note').onclick = () => {
               overlay.remove();
               openModal('Заметка к задаче', `
-                <div class="form-group">
-                  <label>Текст заметки</label>
-                  <textarea name="note" rows="3">${task.note || ''}</textarea>
-                </div>
+                <div class="form-group"><label>Текст заметки</label><textarea name="note" rows="3">${task.note || ''}</textarea></div>
               `, 'Сохранить', async (ov) => {
-                const f = ov.querySelector('form');
-                task.note = f.note.value.trim();
+                const f = ov.querySelector('form'); task.note = f.note.value.trim();
                 await put('tasks', task); render(); return true;
               });
             };
@@ -449,19 +436,16 @@ const screens = {
                 const idx = state.currentMachineTasks.findIndex(t => t.id === task.id);
                 const prevTask = state.currentMachineTasks[idx - 1];
                 const temp = task.pos; task.pos = prevTask.pos; prevTask.pos = temp;
-                await put('tasks', task); await put('tasks', prevTask);
-                overlay.remove(); render();
+                await put('tasks', task); await put('tasks', prevTask); overlay.remove(); render();
               };
             }
-
             const btnDown = overlay.querySelector('#act-down');
             if (btnDown) {
               btnDown.onclick = async () => {
                 const idx = state.currentMachineTasks.findIndex(t => t.id === task.id);
                 const nextTask = state.currentMachineTasks[idx + 1];
                 const temp = task.pos; task.pos = nextTask.pos; nextTask.pos = temp;
-                await put('tasks', task); await put('tasks', nextTask);
-                overlay.remove(); render();
+                await put('tasks', task); await put('tasks', nextTask); overlay.remove(); render();
               };
             }
 
@@ -471,23 +455,15 @@ const screens = {
                 <div class="form-group"><label>Номер заказа</label><input type="text" name="orderNo" value="${task.orderNo}"></div>
                 <div class="form-group"><label>Название детали</label><input type="text" name="partName" value="${task.partName}"></div>
                 <div class="form-group"><label>Всего нужно</label><input type="number" name="total" value="${task.total}"></div>
-                <div class="form-group">
-                  <label class="checkbox-label">
-                    <input type="checkbox" name="isUrgent" ${task.isUrgent ? 'checked' : ''}> 🚨 Срочная задача
-                  </label>
-                </div>
-                <div class="form-group">
-                  <label>Заметка</label>
-                  <textarea name="note">${task.note || ''}</textarea>
-                </div>
+                <div class="form-group"><label class="checkbox-label"><input type="checkbox" name="isUrgent" ${task.isUrgent ? 'checked' : ''}> 🚨 Срочная задача</label></div>
+                <div class="form-group"><label>Заметка</label><textarea name="note">${task.note || ''}</textarea></div>
               `, 'Сохранить', async (ov) => {
                 const f = ov.querySelector('form');
                 const { value: orderNo } = normalizeOrderNo(f.orderNo.value);
                 const newTotal = parseInt(f.total.value, 10);
                 task.orderNo = orderNo; task.partName = f.partName.value.trim(); task.total = newTotal;
                 task.isUrgent = f.isUrgent.checked; task.note = f.note.value.trim();
-                await put('tasks', task);
-                render(); return true;
+                await put('tasks', task); render(); return true;
               });
             };
 
@@ -495,23 +471,18 @@ const screens = {
               overlay.remove();
               const otherMachines = state.machines.filter(m => m.id !== id).sort((a,b) => a.order - b.order);
               const options = otherMachines.map(m => `<option value="${m.id}">${m.number}. ${m.model}</option>`).join('');
-              
               openModal('Переместить', `
                 <div class="form-group"><label>Выберите станок</label><select name="targetMachine">${options}</select></div>
-                <div class="form-group"><label>Позиция</label>
-                  <select name="targetPos"><option value="start">В начало</option><option value="end">В конец</option></select>
-                </div>
+                <div class="form-group"><label>Позиция</label><select name="targetPos"><option value="start">В начало</option><option value="end">В конец</option></select></div>
               `, 'Переместить', async (ov) => {
                 const f = ov.querySelector('form');
-                const targetId = f.targetMachine.value;
-                const posRule = f.targetPos.value;
+                const targetId = f.targetMachine.value; const posRule = f.targetPos.value;
                 await deleteItem('tasks', task.id);
                 const targetTasks = state.allTasks.filter(t => t.machineId === targetId).sort((a,b) => a.pos - b.pos);
                 task.machineId = targetId;
                 if (posRule === 'start') { task.pos = 1; for (let t of targetTasks) { t.pos += 1; await put('tasks', t); } } 
                 else { task.pos = targetTasks.length + 1; }
-                await put('tasks', task);
-                render(); return true;
+                await put('tasks', task); render(); return true;
               });
             };
 
@@ -656,7 +627,12 @@ const screens = {
 
       if (!isEdit) {
         // РЕЖИМ ПРОСМОТРА
-        const tNames = (part.toolingIds || []).map(tid => state.toolings.find(t => t.id === tid)?.code).filter(Boolean).join(', ');
+        // Пункт 4: Ссылки на оснастку
+        const tLinks = (part.toolingIds || []).map(tid => {
+          const tool = state.toolings.find(t => t.id === tid);
+          return tool ? `<a href="#/tooling/${tool.id}" style="color:var(--accent); text-decoration:underline;">${tool.code}</a>` : null;
+        }).filter(Boolean).join(', ');
+
         const mNames = (part.machineIds || []).map(mid => {
           const m = state.machines.find(x => x.id === mid);
           return m ? `${m.number}. ${m.model}` : null;
@@ -672,7 +648,7 @@ const screens = {
             </div>
             <div class="form-group">
               <label>Оснастка</label>
-              <div style="padding:12px; background:var(--bg); border-radius:8px; min-height:44px;">${tNames || '<span style="color:var(--text-muted)">Не привязана</span>'}</div>
+              <div style="padding:12px; background:var(--bg); border-radius:8px; min-height:44px;">${tLinks || '<span style="color:var(--text-muted)">Не привязана</span>'}</div>
             </div>
             <div class="form-group">
               <label>Станки, где делали</label>
@@ -689,7 +665,7 @@ const screens = {
         `;
       }
 
-      // РЕЖИМ РЕДАКТИРОВАНИЯ (сокращено, логика идентична v28)
+      // РЕЖИМ РЕДАКТИРОВАНИЯ
       return `
         <div class="card" style="margin-top:0;">
           <div class="form-group">
@@ -709,6 +685,12 @@ const screens = {
 
           <h3 style="margin-top:20px;">Привязанная оснастка</h3>
           <div id="tooling-selects"></div>
+          
+          <!-- Пункт 1: Ввод нового шифра -->
+          <div class="form-group" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
+            <label style="color:var(--accent);">+ Ввести новый шифр оснастки</label>
+            <input type="text" id="new-tooling-code" placeholder="Например: П-999 (создастся новая карточка)">
+          </div>
 
           <h3 style="margin-top:20px;">Станки, где делали</h3>
           <div class="tags-container" id="part-machines">
@@ -733,7 +715,6 @@ const screens = {
       const part = isNew ? { toolingIds: [], machineIds: [] } : state.parts.find(p => p.id === id);
 
       if (!isEdit) {
-        // Кнопка удаления
         document.getElementById('btn-delete-part').onclick = async () => {
           if (confirm('Вы уверены, что хотите удалить эту деталь?')) {
             await deleteItem('parts', id);
@@ -742,16 +723,10 @@ const screens = {
           }
         };
 
-        // КНОПКА "ДОБАВИТЬ В ЗАДАНИЕ" ИЗ КАРТОЧКИ ДЕТАЛИ
+        // Пункт 2: Добавление в задание из карточки (все станки + автосохранение станка)
         document.getElementById('btn-add-task-from-part').onclick = () => {
-          const allowedMachines = state.machines.filter(m => part.machineIds?.includes(m.id)).sort((a,b)=>a.order-b.order);
-          
-          if (allowedMachines.length === 0) {
-            showToast('У детали не указаны станки. Отредактируйте карточку.');
-            return;
-          }
-
-          const mOpts = allowedMachines.map(m => `<option value="${m.id}">${m.number}. ${m.model}</option>`).join('');
+          const allMachines = state.machines.sort((a,b)=>a.order-b.order);
+          const mOpts = allMachines.map(m => `<option value="${m.id}">${m.number}. ${m.model}</option>`).join('');
 
           openModal('Добавить в задание', `
             <div style="margin-bottom:15px; font-size:15px;">
@@ -786,30 +761,34 @@ const screens = {
             if (!orderNo) { showToast('Введите номер заказа'); return false; }
             if (isNaN(total) || total < 1) { showToast('Количество должно быть больше 0'); return false; }
 
-            // Получаем текущие задачи для выбранного станка, чтобы определить позицию
+            // Автоматически добавляем станок в карточку детали, если его там нет
+            if (!part.machineIds) part.machineIds = [];
+            if (!part.machineIds.includes(machineId)) {
+              part.machineIds.push(machineId);
+              await put('parts', part);
+            }
+
             const currentMachineTasks = await getTasksByMachine(machineId);
-            const isDuplicate = currentMachineTasks.some(t => t.orderNo === orderNo && t.partName.toLowerCase() === part.name.toLowerCase());
-            
-            if (isDuplicate) {
+            if (currentMachineTasks.some(t => t.orderNo === orderNo && t.partName.toLowerCase() === part.name.toLowerCase())) {
               if (!confirm(`Задача "${part.name}" по заказу ${orderNo} уже есть на этом станке. Всё равно добавить?`)) return false;
             }
 
             const newTask = { 
               id: 'task_' + Date.now(), machineId: machineId, pos: currentMachineTasks.length + 1, 
               orderNo, partName: part.name, total, done: 0, isUrgent, note: '',
-              partId: part.id, // Автоматически привязываем ID
+              partId: part.id,
               createdAt: new Date().toISOString() 
             };
             await put('tasks', newTask);
             showToast(`Задача добавлена на станок`);
-            location.hash = '#/data'; // Или можно перейти на станок
+            location.hash = '#/data'; 
             return true;
           });
         };
         return;
       }
 
-      // Логика редактирования (сокращена, идентична v28)
+      // Логика редактирования
       let newPhotoBase64 = null;
       let currentToolingIds = part.toolingIds ? [...part.toolingIds] : [];
 
@@ -849,7 +828,7 @@ const screens = {
         const allOpts = state.toolings.map(t => `<option value="${t.id}">${t.code}</option>`).join('');
         html += `<div style="display:flex; gap:8px; margin-bottom:8px;">
             <select id="add-tooling-select" style="flex:1; padding:12px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); font-size:16px;">
-              <option value="">+ Добавить оснастку...</option>${allOpts}
+              <option value="">+ Выбрать из списка...</option>${allOpts}
             </select></div>`;
         container.innerHTML = html;
 
@@ -869,9 +848,24 @@ const screens = {
         if (!name) { showToast('Введите название детали'); return; }
         const machineIds = Array.from(document.querySelectorAll('#part-machines .tag-checkbox:checked')).map(cb => cb.value);
         const note = document.getElementById('part-note').value.trim();
+        
+        // Пункт 1: Обработка нового шифра оснастки
+        const newToolingCode = document.getElementById('new-tooling-code').value.trim();
+        if (newToolingCode) {
+          let existingTool = state.toolings.find(t => t.code.toLowerCase() === newToolingCode.toLowerCase());
+          if (existingTool) {
+            if (!currentToolingIds.includes(existingTool.id)) currentToolingIds.push(existingTool.id);
+          } else {
+            const newToolingId = 'tool_' + Date.now();
+            await put('toolings', { id: newToolingId, code: newToolingCode, name: '', note: '', photo: '' });
+            currentToolingIds.push(newToolingId);
+          }
+        }
+
         let finalPhoto = isNew ? '' : (state.parts.find(p => p.id === id)?.photo || '');
         if (newPhotoBase64 !== null) finalPhoto = newPhotoBase64;
         const partId = isNew ? 'part_' + Date.now() : id;
+        
         await put('parts', { id: partId, name, note, toolingIds: currentToolingIds, machineIds, photo: finalPhoto });
         showToast('Деталь сохранена');
         location.hash = '#/data';
@@ -1021,7 +1015,7 @@ const screens = {
             </div>`;
         }).join('');
         document.querySelectorAll('.btn-return').forEach(btn => {
-          btn.onclick = () => showToast('Функция возврата в разработке для v29');
+          btn.onclick = () => showToast('Функция возврата в разработке');
         });
       };
       document.getElementById('hist-start').onchange = (e) => { state.historyStartDate = e.target.value; renderList(); };
@@ -1052,7 +1046,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.5 · Связь справочников</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 2.6 · Удобный ввод</div>
       `;
     },
     afterRender: () => {
@@ -1060,30 +1054,20 @@ const screens = {
         r.addEventListener('change', () => { localStorage.setItem('theme', r.value); applyTheme(); });
       });
 
-      // ОБНОВЛЕННЫЙ ЭКСПОРТ (Включает справочники)
       document.getElementById('btn-export-excel').onclick = () => {
         if (typeof XLSX === 'undefined') { showToast('Ошибка: библиотека Excel не загрузилась'); return; }
         const wb = XLSX.utils.book_new();
         const historyActive = state.history.filter(h => h.status === 'active');
-
         const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего', 'Срочно', 'Заметка']];
         historyActive.filter(h => h.type === 'done').forEach(h => {
           wsDoneData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.total, h.isUrgent ? 'Да' : '', h.note || '']);
         });
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsDoneData), 'Выполнено');
 
-        const wsCancelData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Остаток', 'Заметка']];
-        historyActive.filter(h => h.type === 'cancel').forEach(h => {
-          wsCancelData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.note || '']);
-        });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsCancelData), 'Отменено');
-
-        // Выгрузка Деталей
         const wsParts = [['Название', 'Заметка', 'Оснастка (ID)', 'Станки (ID)']];
         state.parts.forEach(p => wsParts.push([p.name, p.note || '', (p.toolingIds||[]).join(', '), (p.machineIds||[]).join(', ')]));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsParts), 'Справочник деталей');
 
-        // Выгрузка Оснастки
         const wsTools = [['Шифр', 'Название', 'Заметка']];
         state.toolings.forEach(t => wsTools.push([t.code, t.name || '', t.note || '']));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsTools), 'Справочник оснастки');
@@ -1091,27 +1075,21 @@ const screens = {
         XLSX.writeFile(wb, `Отчет_${formatDate(new Date())}.xlsx`);
       };
 
-      // ОБНОВЛЕННЫЙ БЭКАП
       document.getElementById('btn-backup').onclick = async () => {
         const data = {
           version: 2, exportDate: new Date().toISOString(),
           machines: state.machines, tasks: state.allTasks, history: state.history,
-          parts: state.parts, toolings: state.toolings // Добавили справочники
+          parts: state.parts, toolings: state.toolings
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `backup_${formatDate(new Date())}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        showToast('Копия сохранена');
+        a.href = url; a.download = `backup_${formatDate(new Date())}.json`; a.click();
+        URL.revokeObjectURL(url); showToast('Копия сохранена');
       };
 
       const fileInput = document.getElementById('file-restore');
       document.getElementById('btn-restore').onclick = () => fileInput.click();
-      
-      // ОБНОВЛЕННЫЙ ИМПОРТ
       fileInput.onchange = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -1121,26 +1099,17 @@ const screens = {
             const data = JSON.parse(ev.target.result);
             if (!data.machines || !data.tasks || !data.history) throw new Error('Неверный формат файла');
             if (!confirm('ВНИМАНИЕ! Все текущие данные будут заменены данными из файла. Продолжить?')) return;
-
             const db = await openDB();
             const tx = db.transaction(['machines', 'tasks', 'history', 'parts', 'toolings'], 'readwrite');
-            tx.objectStore('machines').clear();
-            tx.objectStore('tasks').clear();
-            tx.objectStore('history').clear();
-            tx.objectStore('parts').clear();
-            tx.objectStore('toolings').clear();
-            
+            tx.objectStore('machines').clear(); tx.objectStore('tasks').clear(); tx.objectStore('history').clear();
+            tx.objectStore('parts').clear(); tx.objectStore('toolings').clear();
             data.machines.forEach(m => tx.objectStore('machines').put(m));
             data.tasks.forEach(t => tx.objectStore('tasks').put(t));
             data.history.forEach(h => tx.objectStore('history').put(h));
             if (data.parts) data.parts.forEach(p => tx.objectStore('parts').put(p));
             if (data.toolings) data.toolings.forEach(t => tx.objectStore('toolings').put(t));
-            
-            tx.oncomplete = async () => {
-              showToast('Данные успешно восстановлены');
-              render();
-            };
-          } catch (err) { alert('Ошибка чтения файла: ' + err.message); }
+            tx.oncomplete = async () => { showToast('Данные восстановлены'); render(); };
+          } catch (err) { alert('Ошибка: ' + err.message); }
         };
         reader.readAsText(file);
       };
@@ -1188,14 +1157,11 @@ async function render() {
     state.currentMachineTasks = await getTasksByMachine(param);
     const machine = state.machines.find(x => x.id === param);
     document.getElementById('app-title').textContent = machine ? `${machine.number}. ${machine.model}` : 'Станок';
-  } 
-  else if (route === 'part') { 
+  } else if (route === 'part') { 
     document.getElementById('app-title').textContent = param === 'new' ? 'Новая деталь' : 'Деталь';
-  }
-  else if (route === 'tooling') { 
+  } else if (route === 'tooling') { 
     document.getElementById('app-title').textContent = param === 'new' ? 'Новая оснастка' : 'Оснастка';
-  }
-  else {
+  } else {
     document.getElementById('app-title').textContent = screens[route]?.title || 'Учет';
   }
 
