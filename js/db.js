@@ -1,5 +1,5 @@
 const DB_NAME = 'uchet-db';
-const DB_VERSION = 2; // ПОДНЯЛИ ВЕРСИЮ ДЛЯ НОВЫХ ТАБЛИЦ
+const DB_VERSION = 3; // ПОДНЯЛИ ВЕРСИЮ ДЛЯ ЗАМЕТОК
 let dbInstance = null;
 
 const MACHINES_SEED = [
@@ -37,7 +37,6 @@ function openDB() {
         store.createIndex('orderNo', 'orderNo', { unique: false });
         store.createIndex('machineId', 'machineId', { unique: false });
       }
-      // НОВЫЕ ТАБЛИЦЫ СПРАВОЧНИКОВ
       if (!db.objectStoreNames.contains('parts')) {
         const store = db.createObjectStore('parts', { keyPath: 'id' });
         store.createIndex('name', 'name', { unique: false });
@@ -45,6 +44,11 @@ function openDB() {
       if (!db.objectStoreNames.contains('toolings')) {
         const store = db.createObjectStore('toolings', { keyPath: 'id' });
         store.createIndex('code', 'code', { unique: false });
+      }
+      // НОВАЯ ТАБЛИЦА ДЛЯ ИНСТРУКЦИЙ
+      if (!db.objectStoreNames.contains('notes')) {
+        const store = db.createObjectStore('notes', { keyPath: 'id' });
+        store.createIndex('title', 'title', { unique: false });
       }
     };
     req.onsuccess = (e) => { dbInstance = e.target.result; resolve(dbInstance); };
@@ -103,4 +107,4 @@ async function seedDB() {
       await put('machines', m);
     }
   }
-                                           }
+}
