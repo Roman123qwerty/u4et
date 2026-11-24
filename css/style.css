@@ -28,7 +28,7 @@ body {
   background: var(--card); border-bottom: 1px solid var(--border); z-index: 10;
 }
 .header-left { display: flex; align-items: center; gap: 8px; }
-#btn-back { background: none; border: none; color: var(--accent); font-size: 24px; padding: 0 8px 0 0; display: none; }
+#btn-back { background: none; border: none; color: var(--accent); font-size: 24px; padding: 0 8px 0 0; display: none; cursor: pointer; }
 #app-title { font-weight: 600; font-size: 18px; }
 .header-action { background: none; border: none; color: var(--accent); font-weight: 600; font-size: 15px; cursor: pointer; }
 
@@ -74,10 +74,15 @@ body {
   background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
   padding: 8px 10px; margin-bottom: 6px; font-size: 13px;
 }
-.overview-task.urgent { border-color: var(--danger); border-width: 2px; }
+.overview-task.is-urgent { border-color: var(--danger); border-width: 2px; }
+.overview-task.is-setup { border-color: var(--ok); border-width: 2px; }
+.overview-task.is-urgent.is-setup {
+  border: 2px solid transparent;
+  background: linear-gradient(var(--bg), var(--bg)) padding-box,
+              linear-gradient(to right, var(--danger) 50%, var(--ok) 50%) border-box;
+}
 .overview-task .ot-title { font-weight: 600; color: var(--accent); margin-bottom: 2px; }
 .overview-task .ot-qty { font-weight: 600; color: var(--warn); }
-.overview-task .ot-note { font-size: 12px; color: var(--text-muted); margin-top: 4px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* --- Станки --- */
 .machine-list { display: flex; flex-direction: column; gap: 8px; }
@@ -97,14 +102,24 @@ body {
   padding: 12px; margin-bottom: 8px;
   display: flex; justify-content: space-between; align-items: center;
 }
-.task-card.urgent { border: 2px solid var(--danger); background: rgba(220, 38, 38, 0.05); }
+
+/* НОВЫЕ СТИЛИ ДЛЯ РАМОК */
+.task-card.is-urgent { border: 2px solid var(--danger); }
+.task-card.is-setup { border: 2px solid var(--ok); }
+.task-card.is-urgent.is-setup {
+  border: 2px solid transparent;
+  background: linear-gradient(var(--card), var(--card)) padding-box,
+              linear-gradient(to right, var(--danger) 50%, var(--ok) 50%) border-box;
+}
+
 .task-content { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
-.task-header { display: flex; gap: 8px; font-size: 13px; color: var(--text-muted); margin-bottom: 4px; align-items: center; }
+.task-header { display: flex; gap: 8px; font-size: 13px; color: var(--text-muted); margin-bottom: 4px; align-items: center; flex-wrap: wrap; }
 .task-order { font-weight: 600; color: var(--accent); font-size: 14px; }
 .task-part { font-size: 17px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); text-decoration: none; }
 .task-part.linked { color: var(--accent); text-decoration: underline; }
 .task-qty { font-size: 15px; font-weight: 600; color: var(--warn); }
 .urgent-badge { background: var(--danger); color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; }
+.setup-badge { background: var(--ok); color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; }
 .task-note { font-size: 13px; color: var(--text-muted); font-style: italic; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .btn-check {
@@ -118,10 +133,11 @@ body {
 /* --- Данные (Подвкладки) --- */
 .sub-tabs {
   display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 8px;
+  overflow-x: auto;
 }
 .sub-tab {
   flex: 1; text-align: center; padding: 8px; border-radius: 8px;
-  font-weight: 600; color: var(--text-muted); cursor: pointer; font-size: 15px;
+  font-weight: 600; color: var(--text-muted); cursor: pointer; font-size: 14px; white-space: nowrap;
 }
 .sub-tab.active { background: var(--accent); color: #fff; }
 
@@ -145,6 +161,9 @@ body {
 }
 .tag.active { background: var(--accent); color: #fff; }
 .tag-checkbox { display: none; }
+
+/* Заметки (Инструкции) */
+.note-photo { width: 100%; border-radius: 8px; margin-bottom: 8px; object-fit: contain; max-height: 300px; background: var(--bg); }
 
 /* Автодополнение */
 .autocomplete-container { position: relative; }
