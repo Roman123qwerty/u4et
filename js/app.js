@@ -21,9 +21,9 @@ window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () 
 // ---- Состояние ----
 const state = { 
   machines: [], currentMachineTasks: [], allTasks: [], history: [],
-  parts: [], toolings: [], 
+  parts: [], toolings: [], notes: [],
   historyStartDate: '', historyEndDate: '', searchOrder: '',
-  dataSubTab: 'parts'
+  dataSubTab: 'parts' // 'parts' | 'toolings' | 'orders' | 'notes'
 };
 
 // ---- Утилиты ----
@@ -136,8 +136,8 @@ const screens = {
             <div class="overview-col-body">
               ${mTasks.length === 0 ? '<div style="text-align:center;color:var(--text-muted);font-size:13px;margin-top:20px;">Пусто</div>' : ''}
               ${mTasks.map(t => `
-                <div class="overview-task ${t.isUrgent ? 'urgent' : ''}">
-                  <div class="ot-title">Заказ ${t.orderNo} ${t.isUrgent ? '🚨' : ''}</div>
+                <div class="overview-task ${t.isUrgent ? 'is-urgent' : ''} ${t.isSetup ? 'is-setup' : ''}">
+                  <div class="ot-title">Заказ ${t.orderNo} ${t.isUrgent ? '🚨' : ''} ${t.isSetup ? '🛠️' : ''}</div>
                   <div>${t.partName}</div>
                   <div class="ot-qty">⏳ ${t.total - t.done}(${t.total})</div>
                 </div>
@@ -167,7 +167,7 @@ const screens = {
             ${hasTasks ? `
               <div class="machine-first-task">
                 №${firstTask.pos} ⏳ ${firstTask.total - firstTask.done}(${firstTask.total}) 
-                <span style="color:var(--accent); font-weight:600">Заказ ${firstTask.orderNo}</span> · ${firstTask.partName} ${firstTask.isUrgent ? '🚨' : ''}
+                <span style="color:var(--accent); font-weight:600">Заказ ${firstTask.orderNo}</span> · ${firstTask.partName} ${firstTask.isUrgent ? '🚨' : ''} ${firstTask.isSetup ? '🛠️' : ''}
               </div>
             ` : `<div class="machine-queue-empty">очередь пуста</div>`}
           </div>
@@ -199,12 +199,13 @@ const screens = {
           const partLink = t.partId ? `<a href="#/part/${t.partId}" class="task-part linked">${t.partName}</a>` : `<div class="task-part">${t.partName}</div>`;
           
           html += `
-            <div class="task-card ${t.isUrgent ? 'urgent' : ''}">
+            <div class="task-card ${t.isUrgent ? 'is-urgent' : ''} ${t.isSetup ? 'is-setup' : ''}">
               <div class="task-content">
                 <div class="task-header">
                   <span>№${index + 1}</span>
                   <span class="task-order">Заказ ${t.orderNo}</span>
                   ${t.isUrgent ? '<span class="urgent-badge">СРОЧНО</span>' : ''}
+                  ${t.isSetup ? '<span class="setup-badge">НАСТРОЙКА</span>' : ''}
                 </div>
                 ${partLink}
                 <div class="task-qty">⏳ ${remaining}(${t.total})</div>
@@ -222,7 +223,7 @@ const screens = {
       return html;
     },
     afterRender: (id) => {
-      // ДОБАВЛЕНИЕ ЗАДАЧИ С АВТОДОПОЛНЕНИЕМ
+      // ДОБАВЛЕНИЕ ЗАДАЧИ
       document.getElementById('btn-add-task').onclick = () => {
         let selectedPartId = null;
         
@@ -246,9 +247,12 @@ const screens = {
             <label>Количество</label>
             <input type="number" name="total" value="1">
           </div>
-          <div class="form-group">
+          <div class="form-group" style="display:flex; gap:15px;">
             <label class="checkbox-label">
-              <input type="checkbox" name="isUrgent"> 🚨 Срочная задача
+              <input type="checkbox" name="isUrgent"> 🚨 Срочно
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" name="isSetup"> 🛠️ Настройка
             </label>
           </div>
           <div class="form-group">
@@ -263,6 +267,7 @@ const screens = {
           let partName = form.partName.value.trim();
           let total = parseInt(form.total.value, 10);
           const isUrgent = form.isUrgent.checked;
+          const isSetup = form.isSetup.checked;
           const note = form.note.value.trim();
           const addToDB = form.addToDB ? form.addToDB.checked : false;
 
@@ -281,7 +286,7 @@ const screens = {
 
           const newTask = { 
             id: 'task_' + Date.now(), machineId: id, pos: state.currentMachineTasks.length + 1, 
-            orderNo, partName, total, done: 0, isUrgent, note,
+            orderNo, partName, total, done: 0, isUrgent, isSetup, note,
             partId: selectedPartId,
             createdAt: new Date().toISOString() 
           };
@@ -363,7 +368,7 @@ const screens = {
               id: 'hist_' + Date.now(), type: 'done', machineId: id,
               machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
               orderNo: task.orderNo, partName: task.partName, total: task.total, qty: qty, eventDate, 
-              isUrgent: task.isUrgent, note: task.note, linkedTaskId: task.id, status: 'active'
+              isUrgent: task.isUrgent, isSetup: task.isSetup, note: task.note, linkedTaskId: task.id, status: 'active'
             };
             await put('history', historyRecord);
 
@@ -397,6 +402,7 @@ const screens = {
           if (!isLast) moveHtml += `<button type="button" class="btn btn-secondary" id="act-down" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">⬇️ Опустить в очереди</button>`;
 
           const urgentBtnText = task.isUrgent ? '❌ Убрать срочность' : '🚨 Сделать срочной';
+          const setupBtnText = task.isSetup ? '❌ Убрать настройку' : '🛠️ Поставить настройку';
           const noteBtnText = task.note ? '📝 Изменить заметку' : '📝 Добавить заметку';
 
           openModal('Действия с задачей', `
@@ -407,6 +413,7 @@ const screens = {
             <div style="display:flex; flex-direction:column;">
               ${moveHtml}
               <button type="button" class="btn btn-secondary" id="act-urgent" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">${urgentBtnText}</button>
+              <button type="button" class="btn btn-secondary" id="act-setup" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">${setupBtnText}</button>
               <button type="button" class="btn btn-secondary" id="act-note" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">${noteBtnText}</button>
               <button type="button" class="btn btn-secondary" id="act-edit" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">✏️ Редактировать</button>
               <button type="button" class="btn btn-secondary" id="act-move" style="width:100%; text-align:left; padding:15px; margin-bottom:10px;">➡️ Переместить на другой станок</button>
@@ -419,6 +426,9 @@ const screens = {
             
             overlay.querySelector('#act-urgent').onclick = async () => {
               task.isUrgent = !task.isUrgent; await put('tasks', task); overlay.remove(); render();
+            };
+            overlay.querySelector('#act-setup').onclick = async () => {
+              task.isSetup = !task.isSetup; await put('tasks', task); overlay.remove(); render();
             };
             overlay.querySelector('#act-note').onclick = () => {
               overlay.remove();
@@ -455,14 +465,17 @@ const screens = {
                 <div class="form-group"><label>Номер заказа</label><input type="text" name="orderNo" value="${task.orderNo}"></div>
                 <div class="form-group"><label>Название детали</label><input type="text" name="partName" value="${task.partName}"></div>
                 <div class="form-group"><label>Всего нужно</label><input type="number" name="total" value="${task.total}"></div>
-                <div class="form-group"><label class="checkbox-label"><input type="checkbox" name="isUrgent" ${task.isUrgent ? 'checked' : ''}> 🚨 Срочная задача</label></div>
+                <div class="form-group" style="display:flex; gap:15px;">
+                  <label class="checkbox-label"><input type="checkbox" name="isUrgent" ${task.isUrgent ? 'checked' : ''}> 🚨 Срочно</label>
+                  <label class="checkbox-label"><input type="checkbox" name="isSetup" ${task.isSetup ? 'checked' : ''}> 🛠️ Настройка</label>
+                </div>
                 <div class="form-group"><label>Заметка</label><textarea name="note">${task.note || ''}</textarea></div>
               `, 'Сохранить', async (ov) => {
                 const f = ov.querySelector('form');
                 const { value: orderNo } = normalizeOrderNo(f.orderNo.value);
                 const newTotal = parseInt(f.total.value, 10);
                 task.orderNo = orderNo; task.partName = f.partName.value.trim(); task.total = newTotal;
-                task.isUrgent = f.isUrgent.checked; task.note = f.note.value.trim();
+                task.isUrgent = f.isUrgent.checked; task.isSetup = f.isSetup.checked; task.note = f.note.value.trim();
                 await put('tasks', task); render(); return true;
               });
             };
@@ -493,7 +506,7 @@ const screens = {
                 id: 'hist_' + Date.now(), type: 'cancel', machineId: id,
                 machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
                 orderNo: task.orderNo, partName: task.partName, total: task.total, qty: remaining, eventDate: formatDate(new Date()), 
-                isUrgent: task.isUrgent, note: task.note, linkedTaskId: task.id, status: 'active'
+                isUrgent: task.isUrgent, isSetup: task.isSetup, note: task.note, linkedTaskId: task.id, status: 'active'
               };
               deleteItem('tasks', task.id).then(() => put('history', cancelRecord)).then(() => { render(); });
             };
@@ -510,6 +523,7 @@ const screens = {
           <div class="sub-tab ${state.dataSubTab === 'parts' ? 'active' : ''}" onclick="window.switchDataTab('parts')">Детали</div>
           <div class="sub-tab ${state.dataSubTab === 'toolings' ? 'active' : ''}" onclick="window.switchDataTab('toolings')">Оснастка</div>
           <div class="sub-tab ${state.dataSubTab === 'orders' ? 'active' : ''}" onclick="window.switchDataTab('orders')">Заказы</div>
+          <div class="sub-tab ${state.dataSubTab === 'notes' ? 'active' : ''}" onclick="window.switchDataTab('notes')">Заметки</div>
         </div>
       `;
 
@@ -561,6 +575,23 @@ const screens = {
         contentHtml = `
           <input type="text" class="search-input" id="search-order" placeholder="Введите номер заказа (например 69.27)" value="${state.searchOrder}">
           <div id="search-results"></div>
+        `;
+      } else if (state.dataSubTab === 'notes') {
+        let list = state.notes || [];
+        contentHtml = `
+          <div id="notes-list">
+            ${list.length === 0 ? '<div class="placeholder">Нет заметок. Нажмите «+», чтобы добавить инструкцию.</div>' : ''}
+            ${list.map(n => `
+              <div class="list-item" onclick="location.hash='#/note/${n.id}'">
+                <div>
+                  <div class="list-item-title">${n.title || 'Без названия'}</div>
+                  <div class="list-item-subtitle">${(n.content || '').substring(0, 40)}...</div>
+                </div>
+                <div>›</div>
+              </div>
+            `).join('')}
+          </div>
+          <button class="fab" onclick="location.hash='#/note/new'">+</button>
         `;
       }
 
@@ -626,8 +657,6 @@ const screens = {
       if (!part) return '<div class="placeholder">Деталь не найдена</div>';
 
       if (!isEdit) {
-        // РЕЖИМ ПРОСМОТРА
-        // Пункт 4: Ссылки на оснастку
         const tLinks = (part.toolingIds || []).map(tid => {
           const tool = state.toolings.find(t => t.id === tid);
           return tool ? `<a href="#/tooling/${tool.id}" style="color:var(--accent); text-decoration:underline;">${tool.code}</a>` : null;
@@ -665,7 +694,6 @@ const screens = {
         `;
       }
 
-      // РЕЖИМ РЕДАКТИРОВАНИЯ
       return `
         <div class="card" style="margin-top:0;">
           <div class="form-group">
@@ -686,7 +714,6 @@ const screens = {
           <h3 style="margin-top:20px;">Привязанная оснастка</h3>
           <div id="tooling-selects"></div>
           
-          <!-- Пункт 1: Ввод нового шифра -->
           <div class="form-group" style="margin-top:10px; border-top:1px dashed var(--border); padding-top:10px;">
             <label style="color:var(--accent);">+ Ввести новый шифр оснастки</label>
             <input type="text" id="new-tooling-code" placeholder="Например: П-999 (создастся новая карточка)">
@@ -723,31 +750,18 @@ const screens = {
           }
         };
 
-        // Пункт 2: Добавление в задание из карточки (все станки + автосохранение станка)
         document.getElementById('btn-add-task-from-part').onclick = () => {
           const allMachines = state.machines.sort((a,b)=>a.order-b.order);
           const mOpts = allMachines.map(m => `<option value="${m.id}">${m.number}. ${m.model}</option>`).join('');
 
           openModal('Добавить в задание', `
-            <div style="margin-bottom:15px; font-size:15px;">
-              Деталь: <strong>${part.name}</strong>
-            </div>
-            <div class="form-group">
-              <label>Станок</label>
-              <select name="machineId">${mOpts}</select>
-            </div>
-            <div class="form-group">
-              <label>Номер заказа (NN.NN)</label>
-              <input type="text" name="orderNo" placeholder="69.27">
-            </div>
-            <div class="form-group">
-              <label>Количество</label>
-              <input type="number" name="total" value="1">
-            </div>
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" name="isUrgent"> 🚨 Срочная задача
-              </label>
+            <div style="margin-bottom:15px; font-size:15px;">Деталь: <strong>${part.name}</strong></div>
+            <div class="form-group"><label>Станок</label><select name="machineId">${mOpts}</select></div>
+            <div class="form-group"><label>Номер заказа (NN.NN)</label><input type="text" name="orderNo" placeholder="69.27"></div>
+            <div class="form-group"><label>Количество</label><input type="number" name="total" value="1"></div>
+            <div class="form-group" style="display:flex; gap:15px;">
+              <label class="checkbox-label"><input type="checkbox" name="isUrgent"> 🚨 Срочно</label>
+              <label class="checkbox-label"><input type="checkbox" name="isSetup"> 🛠️ Настройка</label>
             </div>
           `, 'Добавить', async (overlay) => {
             const form = overlay.querySelector('form');
@@ -757,11 +771,11 @@ const screens = {
             const machineId = form.machineId.value;
             const total = parseInt(form.total.value, 10);
             const isUrgent = form.isUrgent.checked;
+            const isSetup = form.isSetup.checked;
 
             if (!orderNo) { showToast('Введите номер заказа'); return false; }
             if (isNaN(total) || total < 1) { showToast('Количество должно быть больше 0'); return false; }
 
-            // Автоматически добавляем станок в карточку детали, если его там нет
             if (!part.machineIds) part.machineIds = [];
             if (!part.machineIds.includes(machineId)) {
               part.machineIds.push(machineId);
@@ -775,7 +789,7 @@ const screens = {
 
             const newTask = { 
               id: 'task_' + Date.now(), machineId: machineId, pos: currentMachineTasks.length + 1, 
-              orderNo, partName: part.name, total, done: 0, isUrgent, note: '',
+              orderNo, partName: part.name, total, done: 0, isUrgent, isSetup, note: '',
               partId: part.id,
               createdAt: new Date().toISOString() 
             };
@@ -788,7 +802,6 @@ const screens = {
         return;
       }
 
-      // Логика редактирования
       let newPhotoBase64 = null;
       let currentToolingIds = part.toolingIds ? [...part.toolingIds] : [];
 
@@ -849,7 +862,6 @@ const screens = {
         const machineIds = Array.from(document.querySelectorAll('#part-machines .tag-checkbox:checked')).map(cb => cb.value);
         const note = document.getElementById('part-note').value.trim();
         
-        // Пункт 1: Обработка нового шифра оснастки
         const newToolingCode = document.getElementById('new-tooling-code').value.trim();
         if (newToolingCode) {
           let existingTool = state.toolings.find(t => t.code.toLowerCase() === newToolingCode.toLowerCase());
@@ -980,6 +992,119 @@ const screens = {
       };
     }
   },
+  note: {
+    title: 'Заметка',
+    render: (id, action) => {
+      const isNew = id === 'new';
+      const isEdit = action === 'edit' || isNew;
+      const note = isNew ? { title: '', content: '', photo1: '', photo2: '' } : state.notes.find(n => n.id === id);
+      if (!note) return '<div class="placeholder">Заметка не найдена</div>';
+
+      if (!isEdit) {
+        return `
+          <div class="card" style="margin-top:0;">
+            <h2 style="margin-bottom:16px;">${note.title || 'Без названия'}</h2>
+            ${note.photo1 ? `<img src="${note.photo1}" class="note-photo">` : ''}
+            ${note.photo2 ? `<img src="${note.photo2}" class="note-photo">` : ''}
+            <div style="font-size:16px; white-space:pre-wrap; margin-bottom:20px;">${note.content || ''}</div>
+            <div class="modal-actions" style="margin-top:20px;">
+              <button type="button" class="btn btn-primary" onclick="location.hash='#/note/${note.id}/edit'">✏️ Редактировать</button>
+              <button type="button" class="btn" id="btn-delete-note" style="background:var(--danger); color:#fff;">Удалить</button>
+            </div>
+          </div>
+        `;
+      }
+
+      return `
+        <div class="card" style="margin-top:0;">
+          <div class="form-group">
+            <label>Заголовок</label>
+            <input type="text" id="note-title" value="${note.title}" placeholder="Как создать задачу">
+          </div>
+          <div class="form-group">
+            <label>Текст инструкции</label>
+            <textarea id="note-content" rows="6" placeholder="Описание...">${note.content || ''}</textarea>
+          </div>
+          <div class="form-group">
+            <label>Фото 1</label>
+            ${note.photo1 ? `<img src="${note.photo1}" class="note-photo" id="photo1-img">` : `<div class="photo-preview" id="photo1-img" style="height:100px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">Нет фото</div>`}
+            <input type="file" id="note-photo1-input" accept="image/*" style="display:none;">
+            <button type="button" class="btn btn-secondary" id="btn-upload-note1" style="margin-top:5px;">Загрузить фото 1</button>
+          </div>
+          <div class="form-group">
+            <label>Фото 2</label>
+            ${note.photo2 ? `<img src="${note.photo2}" class="note-photo" id="photo2-img">` : `<div class="photo-preview" id="photo2-img" style="height:100px;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">Нет фото</div>`}
+            <input type="file" id="note-photo2-input" accept="image/*" style="display:none;">
+            <button type="button" class="btn btn-secondary" id="btn-upload-note2" style="margin-top:5px;">Загрузить фото 2</button>
+          </div>
+
+          <div class="modal-actions" style="margin-top:30px;">
+            <button type="button" class="btn btn-secondary" onclick="location.hash='${isNew ? '#/data' : '#/note/'+id}'">Отмена</button>
+            <button type="button" class="btn btn-primary" id="btn-save-note">Сохранить</button>
+          </div>
+        </div>
+      `;
+    },
+    afterRender: (id, action) => {
+      const isNew = id === 'new';
+      const isEdit = action === 'edit' || isNew;
+
+      if (!isEdit) {
+        document.getElementById('btn-delete-note').onclick = async () => {
+          if (confirm('Удалить эту заметку?')) {
+            await deleteItem('notes', id);
+            showToast('Заметка удалена');
+            location.hash = '#/data';
+          }
+        };
+        return;
+      }
+
+      let newPhoto1 = null;
+      let newPhoto2 = null;
+      const note = isNew ? {} : state.notes.find(n => n.id === id);
+
+      const setupUpload = (btnId, inputId, imgId, setter) => {
+        document.getElementById(btnId).onclick = () => document.getElementById(inputId).click();
+        document.getElementById(inputId).onchange = async (e) => {
+          const file = e.target.files[0];
+          if (!file) return;
+          try {
+            showToast('Обработка...');
+            const b64 = await compressImage(file);
+            setter(b64);
+            const imgEl = document.getElementById(imgId);
+            if (imgEl.tagName === 'IMG') { imgEl.src = b64; } 
+            else {
+              const newImg = document.createElement('img');
+              newImg.src = b64; newImg.className = 'note-photo'; newImg.id = imgId;
+              imgEl.replaceWith(newImg);
+            }
+          } catch (err) { showToast('Ошибка фото'); }
+        };
+      };
+
+      setupUpload('btn-upload-note1', 'note-photo1-input', 'photo1-img', (b64) => newPhoto1 = b64);
+      setupUpload('btn-upload-note2', 'note-photo2-input', 'photo2-img', (b64) => newPhoto2 = b64);
+
+      document.getElementById('btn-save-note').onclick = async () => {
+        const title = document.getElementById('note-title').value.trim();
+        if (!title) { showToast('Введите заголовок'); return; }
+        const content = document.getElementById('note-content').value.trim();
+        
+        let finalPhoto1 = isNew ? '' : (note.photo1 || '');
+        if (newPhoto1 !== null) finalPhoto1 = newPhoto1;
+        
+        let finalPhoto2 = isNew ? '' : (note.photo2 || '');
+        if (newPhoto2 !== null) finalPhoto2 = newPhoto2;
+
+        const noteId = isNew ? 'note_' + Date.now() : id;
+        await put('notes', { id: noteId, title, content, photo1: finalPhoto1, photo2: finalPhoto2 });
+        showToast('Заметка сохранена');
+        location.hash = '#/data';
+      };
+    }
+  },
   history: {
     title: 'История',
     render: () => {
@@ -1008,7 +1133,7 @@ const screens = {
           return `
             <div class="history-card">
               <div class="history-header"><span>${h.eventDate} · ${h.machineSnapshot}</span><span style="color:var(--accent); font-weight:600">Заказ ${h.orderNo}</span></div>
-              <div class="history-part">${h.partName} ${h.isUrgent ? '🚨' : ''}</div>
+              <div class="history-part">${h.partName} ${h.isUrgent ? '🚨' : ''} ${h.isSetup ? '🛠️' : ''}</div>
               <div class="history-qty ${isCancel ? 'cancel' : ''}">${isCancel ? '✕ Отменено (остаток ' + h.qty + ')' : '✓ Сделано ' + h.qty + ' из ' + h.total}</div>
               ${h.note ? `<div style="font-size:13px; font-style:italic; color:var(--text-muted); margin-top:4px;">📝 ${h.note}</div>` : ''}
               <div class="history-actions"><button class="btn-small btn-return" data-id="${h.id}">${isCancel ? 'Возобновить' : 'Вернуть'}</button></div>
@@ -1046,7 +1171,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.6 · Удобный ввод</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 2.7 · Инструкции и подсветка</div>
       `;
     },
     afterRender: () => {
@@ -1055,31 +1180,22 @@ const screens = {
       });
 
       document.getElementById('btn-export-excel').onclick = () => {
-        if (typeof XLSX === 'undefined') { showToast('Ошибка: библиотека Excel не загрузилась'); return; }
+        if (typeof XLSX === 'undefined') { showToast('Ошибка Excel'); return; }
         const wb = XLSX.utils.book_new();
         const historyActive = state.history.filter(h => h.status === 'active');
-        const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего', 'Срочно', 'Заметка']];
+        const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего', 'Срочно', 'Настройка', 'Заметка']];
         historyActive.filter(h => h.type === 'done').forEach(h => {
-          wsDoneData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.total, h.isUrgent ? 'Да' : '', h.note || '']);
+          wsDoneData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.total, h.isUrgent ? 'Да' : '', h.isSetup ? 'Да' : '', h.note || '']);
         });
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsDoneData), 'Выполнено');
-
-        const wsParts = [['Название', 'Заметка', 'Оснастка (ID)', 'Станки (ID)']];
-        state.parts.forEach(p => wsParts.push([p.name, p.note || '', (p.toolingIds||[]).join(', '), (p.machineIds||[]).join(', ')]));
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsParts), 'Справочник деталей');
-
-        const wsTools = [['Шифр', 'Название', 'Заметка']];
-        state.toolings.forEach(t => wsTools.push([t.code, t.name || '', t.note || '']));
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsTools), 'Справочник оснастки');
-
         XLSX.writeFile(wb, `Отчет_${formatDate(new Date())}.xlsx`);
       };
 
       document.getElementById('btn-backup').onclick = async () => {
         const data = {
-          version: 2, exportDate: new Date().toISOString(),
+          version: 3, exportDate: new Date().toISOString(),
           machines: state.machines, tasks: state.allTasks, history: state.history,
-          parts: state.parts, toolings: state.toolings
+          parts: state.parts, toolings: state.toolings, notes: state.notes
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -1097,17 +1213,18 @@ const screens = {
         reader.onload = async (ev) => {
           try {
             const data = JSON.parse(ev.target.result);
-            if (!data.machines || !data.tasks || !data.history) throw new Error('Неверный формат файла');
-            if (!confirm('ВНИМАНИЕ! Все текущие данные будут заменены данными из файла. Продолжить?')) return;
+            if (!data.machines || !data.tasks) throw new Error('Неверный формат');
+            if (!confirm('ВНИМАНИЕ! Все данные будут заменены. Продолжить?')) return;
             const db = await openDB();
-            const tx = db.transaction(['machines', 'tasks', 'history', 'parts', 'toolings'], 'readwrite');
+            const tx = db.transaction(['machines', 'tasks', 'history', 'parts', 'toolings', 'notes'], 'readwrite');
             tx.objectStore('machines').clear(); tx.objectStore('tasks').clear(); tx.objectStore('history').clear();
-            tx.objectStore('parts').clear(); tx.objectStore('toolings').clear();
+            tx.objectStore('parts').clear(); tx.objectStore('toolings').clear(); tx.objectStore('notes').clear();
             data.machines.forEach(m => tx.objectStore('machines').put(m));
-            data.tasks.forEach(t => tx.objectStore('tasks').put(t));
-            data.history.forEach(h => tx.objectStore('history').put(h));
+            if(data.tasks) data.tasks.forEach(t => tx.objectStore('tasks').put(t));
+            if(data.history) data.history.forEach(h => tx.objectStore('history').put(h));
             if (data.parts) data.parts.forEach(p => tx.objectStore('parts').put(p));
             if (data.toolings) data.toolings.forEach(t => tx.objectStore('toolings').put(t));
+            if (data.notes) data.notes.forEach(n => tx.objectStore('notes').put(n));
             tx.oncomplete = async () => { showToast('Данные восстановлены'); render(); };
           } catch (err) { alert('Ошибка: ' + err.message); }
         };
@@ -1135,18 +1252,13 @@ async function render() {
   state.history = await getAll('history');
   state.parts = await getAll('parts');
   state.toolings = await getAll('toolings');
+  state.notes = await getAll('notes');
 
   const btnBack = document.getElementById('btn-back');
-  if (route === 'machine' || route === 'part' || route === 'tooling') {
+  // ИСПРАВЛЕНО: Теперь кнопка Назад использует историю браузера, как в нативных приложениях
+  if (route === 'machine' || route === 'part' || route === 'tooling' || route === 'note') {
     btnBack.style.display = 'block';
-    btnBack.onclick = () => {
-      if (route === 'machine') history.replaceState(null, '', '#/machines');
-      else {
-        if (action === 'edit') history.replaceState(null, '', `#/${route}/${param}`);
-        else history.replaceState(null, '', '#/data');
-      }
-      render();
-    };
+    btnBack.onclick = () => history.back();
     document.getElementById('tabbar').style.display = 'none';
   } else {
     btnBack.style.display = 'none';
@@ -1157,11 +1269,17 @@ async function render() {
     state.currentMachineTasks = await getTasksByMachine(param);
     const machine = state.machines.find(x => x.id === param);
     document.getElementById('app-title').textContent = machine ? `${machine.number}. ${machine.model}` : 'Станок';
-  } else if (route === 'part') { 
+  } 
+  else if (route === 'part') { 
     document.getElementById('app-title').textContent = param === 'new' ? 'Новая деталь' : 'Деталь';
-  } else if (route === 'tooling') { 
+  }
+  else if (route === 'tooling') { 
     document.getElementById('app-title').textContent = param === 'new' ? 'Новая оснастка' : 'Оснастка';
-  } else {
+  }
+  else if (route === 'note') {
+    document.getElementById('app-title').textContent = param === 'new' ? 'Новая заметка' : 'Заметка';
+  }
+  else {
     document.getElementById('app-title').textContent = screens[route]?.title || 'Учет';
   }
 
@@ -1169,7 +1287,7 @@ async function render() {
   document.getElementById('app-main').innerHTML = screen.render(param, action);
   
   document.querySelectorAll('#tabbar a').forEach((a) => {
-    a.classList.toggle('active', a.dataset.tab === route || ((route === 'machine') && a.dataset.tab === 'machines') || ((route === 'part' || route === 'tooling') && a.dataset.tab === 'data'));
+    a.classList.toggle('active', a.dataset.tab === route || ((route === 'machine') && a.dataset.tab === 'machines') || ((route === 'part' || route === 'tooling' || route === 'note') && a.dataset.tab === 'data'));
   });
 
   if (typeof screen.afterRender === 'function') screen.afterRender(param, action);
