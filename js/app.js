@@ -40,7 +40,6 @@ function normalizeOrderNo(input) {
   return { value: parts.join('.'), warning };
 }
 
-// Сжатие фото
 function compressImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -356,10 +355,13 @@ const screens = {
             </div>
             <div class="form-group"><label>Сколько сделано</label><input type="number" name="qty" value="${remaining}"></div>
             <div class="form-group"><label>Дата выполнения</label><input type="date" name="eventDate" value="${today}"></div>
+            <!-- ДОБАВЛЕНО ПОЛЕ ЗАМЕТКИ -->
+            <div class="form-group"><label>Заметка к выполнению</label><textarea name="historyNote" placeholder="Например: сделано с браком"></textarea></div>
           `, 'Подтвердить', async (overlay) => {
             const form = overlay.querySelector('form');
             const qty = parseInt(form.qty.value, 10);
             const eventDate = form.eventDate.value;
+            const historyNote = form.historyNote.value.trim(); // Получаем заметку
             
             if (isNaN(qty) || qty <= 0 || qty > remaining) { showToast(`Введите число от 1 до ${remaining}`); return false; }
             if (!eventDate) { showToast('Укажите дату выполнения'); return false; }
@@ -368,7 +370,9 @@ const screens = {
               id: 'hist_' + Date.now(), type: 'done', machineId: id,
               machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
               orderNo: task.orderNo, partName: task.partName, total: task.total, qty: qty, eventDate, 
-              isUrgent: task.isUrgent, isSetup: task.isSetup, note: task.note, linkedTaskId: task.id, status: 'active'
+              isUrgent: task.isUrgent, isSetup: task.isSetup, 
+              note: historyNote, // Сохраняем заметку в историю
+              linkedTaskId: task.id, status: 'active'
             };
             await put('history', historyRecord);
 
@@ -572,9 +576,23 @@ const screens = {
           <button class="fab" onclick="location.hash='#/tooling/new'">+</button>
         `;
       } else if (state.dataSubTab === 'orders') {
+        // СБОР ВСЕХ УНИКАЛЬНЫХ ЗАКАЗОВ
+        const allOrders = new Set();
+        state.allTasks.forEach(t => allOrders.add(t.orderNo));
+        state.history.forEach(h => allOrders.add(h.orderNo));
+        const sortedOrders = Array.from(allOrders).sort().reverse(); // Новые (с большим номером) сверху
+
         contentHtml = `
-          <input type="text" class="search-input" id="search-order" placeholder="Введите номер заказа (например 69.27)" value="${state.searchOrder}">
-          <div id="search-results"></div>
+          <input type="text" class="search-input" id="search-order" placeholder="Поиск по номеру заказа" value="${state.searchOrder || ''}">
+          <div id="orders-list">
+            ${sortedOrders.length === 0 ? '<div class="placeholder">Заказов пока нет</div>' : ''}
+            ${sortedOrders.map(o => `
+              <div class="list-item" data-order="${o}" onclick="location.hash='#/order/${o}'">
+                <div class="list-item-title">Заказ ${o}</div>
+                <div>›</div>
+              </div>
+            `).join('')}
+          </div>
         `;
       } else if (state.dataSubTab === 'notes') {
         let list = state.notes || [];
@@ -620,32 +638,65 @@ const screens = {
       }
       if (state.dataSubTab === 'orders') {
         const input = document.getElementById('search-order');
-        const results = document.getElementById('search-results');
-        if (!input) return;
-        
-        const doSearch = () => {
-          state.searchOrder = input.value.trim();
-          if (!state.searchOrder) { results.innerHTML = ''; return; }
-          const norm = normalizeOrderNo(state.searchOrder).value;
-          const activeTasks = state.allTasks.filter(t => t.orderNo.includes(norm)).sort((a,b) => a.orderNo.localeCompare(b.orderNo));
-          let html = '';
-          if (activeTasks.length > 0) {
-            html += '<div class="order-section"><h3>В очереди</h3>';
-            activeTasks.forEach(t => {
-              const m = state.machines.find(x => x.id === t.machineId);
-              html += `<div class="order-item">
-                <span style="color:var(--accent); font-weight:600">Заказ ${t.orderNo}</span> · ${t.partName}<br>
-                <span style="color:var(--text-muted); font-size:14px;">Станок: ${m ? m.number + '. ' + m.model : '?'} · Позиция №${t.pos} · Осталось: ${t.total - t.done}(${t.total})</span>
-              </div>`;
-            });
-            html += '</div>';
-          }
-          if (html === '') html = '<div class="placeholder">Ничего не найдено</div>';
-          results.innerHTML = html;
-        };
-        input.addEventListener('input', doSearch);
-        if (state.searchOrder) doSearch();
+        if (input) input.addEventListener('input', (e) => {
+          const q = e.target.value.toLowerCase();
+          document.querySelectorAll('#orders-list .list-item').forEach(el => {
+            const text = el.getAttribute('data-order').toLowerCase();
+            el.style.display = text.includes(q) ? 'flex' : 'none';
+          });
+        });
       }
+    }
+  },
+  order: {
+    title: 'Заказ',
+    render: (orderNo) => {
+      const activeTasks = state.allTasks.filter(t => t.orderNo === orderNo).sort((a,b) => a.pos - b.pos);
+      const historyItems = state.history.filter(h => h.orderNo === orderNo && h.status === 'active').sort((a,b) => new Date(b.eventDate) - new Date(a.eventDate));
+
+      let html = `<div style="padding:0 0 10px 0; font-size:20px; font-weight:bold; color:var(--accent)">
+        Заказ ${orderNo}
+      </div>`;
+
+      // В ОЧЕРЕДИ
+      html += `<h3 style="margin: 15px 0 10px; color:var(--text-muted); font-size:15px;">В ОЧЕРЕДИ (${activeTasks.length})</h3>`;
+      if (activeTasks.length === 0) {
+        html += '<div style="color:var(--text-muted); font-size:14px; margin-bottom:15px;">Нет активных задач</div>';
+      } else {
+        activeTasks.forEach(t => {
+          const m = state.machines.find(x => x.id === t.machineId);
+          html += `<div class="task-card" style="margin-bottom:6px;">
+            <div class="task-content">
+              <div class="task-header">
+                <span>${m ? m.number + '. ' + m.model : '?'}</span>
+                <span class="task-order">Позиция №${t.pos}</span>
+              </div>
+              <div class="task-part">${t.partName} ${t.isUrgent ? '🚨' : ''} ${t.isSetup ? '🛠️' : ''}</div>
+              <div class="task-qty">⏳ ${t.total - t.done}(${t.total})</div>
+              ${t.note ? `<div class="task-note">📝 ${t.note}</div>` : ''}
+            </div>
+          </div>`;
+        });
+      }
+
+      // ИСТОРИЯ
+      html += `<h3 style="margin: 20px 0 10px; color:var(--text-muted); font-size:15px;">ИСТОРИЯ (${historyItems.length})</h3>`;
+      if (historyItems.length === 0) {
+        html += '<div style="color:var(--text-muted); font-size:14px;">Нет записей</div>';
+      } else {
+        historyItems.forEach(h => {
+          const isCancel = h.type === 'cancel';
+          html += `<div class="history-card" style="margin-bottom:6px;">
+            <div class="history-header">
+              <span>${h.eventDate} · ${h.machineSnapshot}</span>
+            </div>
+            <div class="history-part">${h.partName} ${h.isUrgent ? '🚨' : ''} ${h.isSetup ? '🛠️' : ''}</div>
+            <div class="history-qty ${isCancel ? 'cancel' : ''}">${isCancel ? '✕ Отменено' : '✓ ' + h.qty + '/' + h.total}</div>
+            ${h.note ? `<div style="font-size:13px; font-style:italic; color:var(--text-muted); margin-top:4px;">📝 ${h.note}</div>` : ''}
+          </div>`;
+        });
+      }
+      return html;
     }
   },
   part: {
@@ -1171,7 +1222,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.7 · Инструкции и подсветка</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 2.8 · Заказы и заметки</div>
       `;
     },
     afterRender: () => {
@@ -1239,7 +1290,26 @@ window.switchDataTab = (tab) => {
   render();
 };
 
-// ---- Роутинг ----
+// ---- Роутинг и Кнопка НАЗАД ----
+function navigateBack() {
+  const hash = location.hash || '#/overview';
+  const m = hash.match(/^#\/(\w+)(?:\/([^\/]+))?(?:\/(edit))?/);
+  const route = m ? m[1] : 'overview';
+  const param = m ? m[2] : null;
+  const action = m ? m[3] : null;
+
+  // Логическое определение родителя
+  if (action === 'edit') {
+    location.hash = `#/${route}/${param}`;
+  } else if (route === 'machine') {
+    location.hash = '#/machines';
+  } else if (route === 'part' || route === 'tooling' || route === 'note' || route === 'order') {
+    location.hash = '#/data';
+  } else {
+    history.back(); // Если это главная вкладка, ведем себя как браузер (закрываем приложение или идем назад)
+  }
+}
+
 async function render() {
   const hash = location.hash || '#/overview';
   const m = hash.match(/^#\/(\w+)(?:\/([^\/]+))?(?:\/(edit))?/);
@@ -1255,10 +1325,9 @@ async function render() {
   state.notes = await getAll('notes');
 
   const btnBack = document.getElementById('btn-back');
-  // ИСПРАВЛЕНО: Теперь кнопка Назад использует историю браузера, как в нативных приложениях
-  if (route === 'machine' || route === 'part' || route === 'tooling' || route === 'note') {
+  if (route === 'machine' || route === 'part' || route === 'tooling' || route === 'note' || route === 'order') {
     btnBack.style.display = 'block';
-    btnBack.onclick = () => history.back();
+    btnBack.onclick = navigateBack;
     document.getElementById('tabbar').style.display = 'none';
   } else {
     btnBack.style.display = 'none';
@@ -1279,6 +1348,9 @@ async function render() {
   else if (route === 'note') {
     document.getElementById('app-title').textContent = param === 'new' ? 'Новая заметка' : 'Заметка';
   }
+  else if (route === 'order') {
+    document.getElementById('app-title').textContent = `Заказ ${param}`;
+  }
   else {
     document.getElementById('app-title').textContent = screens[route]?.title || 'Учет';
   }
@@ -1287,7 +1359,7 @@ async function render() {
   document.getElementById('app-main').innerHTML = screen.render(param, action);
   
   document.querySelectorAll('#tabbar a').forEach((a) => {
-    a.classList.toggle('active', a.dataset.tab === route || ((route === 'machine') && a.dataset.tab === 'machines') || ((route === 'part' || route === 'tooling' || route === 'note') && a.dataset.tab === 'data'));
+    a.classList.toggle('active', a.dataset.tab === route || ((route === 'machine') && a.dataset.tab === 'machines') || ((route === 'part' || route === 'tooling' || route === 'note' || route === 'order') && a.dataset.tab === 'data'));
   });
 
   if (typeof screen.afterRender === 'function') screen.afterRender(param, action);
