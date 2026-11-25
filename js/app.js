@@ -355,13 +355,12 @@ const screens = {
             </div>
             <div class="form-group"><label>Сколько сделано</label><input type="number" name="qty" value="${remaining}"></div>
             <div class="form-group"><label>Дата выполнения</label><input type="date" name="eventDate" value="${today}"></div>
-            <!-- ДОБАВЛЕНО ПОЛЕ ЗАМЕТКИ -->
             <div class="form-group"><label>Заметка к выполнению</label><textarea name="historyNote" placeholder="Например: сделано с браком"></textarea></div>
           `, 'Подтвердить', async (overlay) => {
             const form = overlay.querySelector('form');
             const qty = parseInt(form.qty.value, 10);
             const eventDate = form.eventDate.value;
-            const historyNote = form.historyNote.value.trim(); // Получаем заметку
+            const historyNote = form.historyNote.value.trim();
             
             if (isNaN(qty) || qty <= 0 || qty > remaining) { showToast(`Введите число от 1 до ${remaining}`); return false; }
             if (!eventDate) { showToast('Укажите дату выполнения'); return false; }
@@ -371,7 +370,7 @@ const screens = {
               machineSnapshot: `${state.machines.find(x => x.id === id).number}. ${state.machines.find(x => x.id === id).model}`,
               orderNo: task.orderNo, partName: task.partName, total: task.total, qty: qty, eventDate, 
               isUrgent: task.isUrgent, isSetup: task.isSetup, 
-              note: historyNote, // Сохраняем заметку в историю
+              note: historyNote,
               linkedTaskId: task.id, status: 'active'
             };
             await put('history', historyRecord);
@@ -576,11 +575,10 @@ const screens = {
           <button class="fab" onclick="location.hash='#/tooling/new'">+</button>
         `;
       } else if (state.dataSubTab === 'orders') {
-        // СБОР ВСЕХ УНИКАЛЬНЫХ ЗАКАЗОВ
         const allOrders = new Set();
         state.allTasks.forEach(t => allOrders.add(t.orderNo));
         state.history.forEach(h => allOrders.add(h.orderNo));
-        const sortedOrders = Array.from(allOrders).sort().reverse(); // Новые (с большим номером) сверху
+        const sortedOrders = Array.from(allOrders).sort().reverse();
 
         contentHtml = `
           <input type="text" class="search-input" id="search-order" placeholder="Поиск по номеру заказа" value="${state.searchOrder || ''}">
@@ -658,7 +656,6 @@ const screens = {
         Заказ ${orderNo}
       </div>`;
 
-      // В ОЧЕРЕДИ
       html += `<h3 style="margin: 15px 0 10px; color:var(--text-muted); font-size:15px;">В ОЧЕРЕДИ (${activeTasks.length})</h3>`;
       if (activeTasks.length === 0) {
         html += '<div style="color:var(--text-muted); font-size:14px; margin-bottom:15px;">Нет активных задач</div>';
@@ -679,7 +676,6 @@ const screens = {
         });
       }
 
-      // ИСТОРИЯ
       html += `<h3 style="margin: 20px 0 10px; color:var(--text-muted); font-size:15px;">ИСТОРИЯ (${historyItems.length})</h3>`;
       if (historyItems.length === 0) {
         html += '<div style="color:var(--text-muted); font-size:14px;">Нет записей</div>';
@@ -1179,6 +1175,7 @@ const screens = {
         if (state.historyEndDate) filtered = filtered.filter(h => h.eventDate <= state.historyEndDate);
         filtered.sort((a,b) => new Date(b.eventDate) - new Date(a.eventDate));
         if (filtered.length === 0) { list.innerHTML = '<div class="placeholder">История пуста</div>'; return; }
+        
         list.innerHTML = filtered.map(h => {
           const isCancel = h.type === 'cancel';
           return `
@@ -1190,8 +1187,70 @@ const screens = {
               <div class="history-actions"><button class="btn-small btn-return" data-id="${h.id}">${isCancel ? 'Возобновить' : 'Вернуть'}</button></div>
             </div>`;
         }).join('');
+
+        // ВОЗВРАТ ИЗ ИСТОРИИ
         document.querySelectorAll('.btn-return').forEach(btn => {
-          btn.onclick = () => showToast('Функция возврата в разработке');
+          btn.onclick = () => {
+            const histItem = state.history.find(x => x.id === btn.dataset.id);
+            
+            openModal('Вернуть в очередь', `
+              <div style="margin-bottom:15px; font-size:15px;">
+                Задача: <strong>${histItem.partName}</strong><br>
+                Заказ: ${histItem.orderNo}<br>
+                Возвращается: <strong>${histItem.qty}</strong> шт.
+              </div>
+              <div class="form-group">
+                <label>Куда добавить</label>
+                <select name="targetPos" style="width:100%; padding:12px; border-radius:8px; background:var(--bg); color:var(--text); border:1px solid var(--border); font-size:16px;">
+                  <option value="start">В начало очереди</option>
+                  <option value="end">В конец очереди</option>
+                </select>
+              </div>
+            `, 'Вернуть', async (overlay) => {
+              const posRule = overlay.querySelector('select[name="targetPos"]').value;
+              let existingTask = state.allTasks.find(t => t.id === histItem.linkedTaskId);
+              
+              if (existingTask) {
+                existingTask.done -= histItem.qty;
+                if (existingTask.done < 0) existingTask.done = 0;
+                await put('tasks', existingTask);
+              } else {
+                const machineTasks = state.allTasks.filter(t => t.machineId === histItem.machineId).sort((a,b) => a.pos - b.pos);
+                let newPos = posRule === 'start' ? 1 : machineTasks.length + 1;
+                
+                if (posRule === 'start') {
+                  for (let t of machineTasks) { t.pos += 1; await put('tasks', t); }
+                }
+
+                const newTask = {
+                  id: 'task_' + Date.now(), 
+                  machineId: histItem.machineId, 
+                  pos: newPos, 
+                  orderNo: histItem.orderNo, 
+                  partName: histItem.partName, 
+                  total: histItem.total, 
+                  done: histItem.total - histItem.qty,
+                  isUrgent: histItem.isUrgent || false,
+                  isSetup: histItem.isSetup || false,
+                  note: histItem.note || '',
+                  partId: null,
+                  createdAt: new Date().toISOString()
+                };
+                
+                const dbPart = state.parts.find(p => p.name.toLowerCase() === histItem.partName.toLowerCase());
+                if (dbPart) newTask.partId = dbPart.id;
+
+                await put('tasks', newTask);
+              }
+              
+              histItem.status = 'returned';
+              await put('history', histItem);
+              
+              render();
+              showToast('Возвращено в очередь');
+              return true;
+            });
+          };
         });
       };
       document.getElementById('hist-start').onchange = (e) => { state.historyStartDate = e.target.value; renderList(); };
@@ -1222,7 +1281,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.8 · Заказы и заметки</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 2.9 · Финальные правки</div>
       `;
     },
     afterRender: () => {
@@ -1298,15 +1357,19 @@ function navigateBack() {
   const param = m ? m[2] : null;
   const action = m ? m[3] : null;
 
-  // Логическое определение родителя
+  // Используем replaceState для навигации к родителю, чтобы не плодить историю
   if (action === 'edit') {
-    location.hash = `#/${route}/${param}`;
+    history.replaceState(null, '', `#/${route}/${param}`);
+    render();
   } else if (route === 'machine') {
-    location.hash = '#/machines';
+    history.replaceState(null, '', '#/machines');
+    render();
   } else if (route === 'part' || route === 'tooling' || route === 'note' || route === 'order') {
-    location.hash = '#/data';
+    history.replaceState(null, '', '#/data');
+    render();
   } else {
-    history.back(); // Если это главная вкладка, ведем себя как браузер (закрываем приложение или идем назад)
+    // Если мы на главной вкладке, пытаемся выйти
+    window.history.back();
   }
 }
 
