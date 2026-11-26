@@ -23,7 +23,7 @@ const state = {
   machines: [], currentMachineTasks: [], allTasks: [], history: [],
   parts: [], toolings: [], notes: [],
   historyStartDate: '', historyEndDate: '', searchOrder: '',
-  dataSubTab: 'parts' // 'parts' | 'toolings' | 'orders' | 'notes'
+  dataSubTab: 'parts'
 };
 
 // ---- Утилиты ----
@@ -649,49 +649,100 @@ const screens = {
   order: {
     title: 'Заказ',
     render: (orderNo) => {
-      const activeTasks = state.allTasks.filter(t => t.orderNo === orderNo).sort((a,b) => a.pos - b.pos);
-      const historyItems = state.history.filter(h => h.orderNo === orderNo && h.status === 'active').sort((a,b) => new Date(b.eventDate) - new Date(a.eventDate));
+      const orderTasks = state.allTasks.filter(t => t.orderNo === orderNo);
+      const orderHistory = state.history.filter(h => h.orderNo === orderNo && h.type === 'done' && h.status === 'active');
+      
+      // Сбор уникальных деталей по заказу
+      const uniqueParts = new Map();
+
+      // Сначала берем активные задачи (они в приоритете, так как содержат актуальный done)
+      orderTasks.forEach(t => {
+        const key = t.partName.toLowerCase();
+        uniqueParts.set(key, {
+          partName: t.partName,
+          total: t.total,
+          done: t.done,
+          isInQueue: true,
+          machineId: t.machineId,
+          pos: t.pos,
+          isUrgent: t.isUrgent,
+          isSetup: t.isSetup
+        });
+      });
+
+      // Добавляем выполненные детали (которых уже нет в очереди)
+      orderHistory.forEach(h => {
+        const key = h.partName.toLowerCase();
+        if (!uniqueParts.has(key)) {
+          uniqueParts.set(key, {
+            partName: h.partName,
+            total: h.total,
+            done: 0,
+            isInQueue: false,
+            isUrgent: h.isUrgent,
+            isSetup: h.isSetup
+          });
+        }
+        const part = uniqueParts.get(key);
+        if (!part.isInQueue) {
+          part.done += h.qty;
+        }
+      });
+
+      const partsArray = Array.from(uniqueParts.values());
+      
+      // Сортировка: сначала в очереди (по позиции), затем выполненные (по алфавиту)
+      partsArray.sort((a, b) => {
+        if (a.isInQueue && !b.isInQueue) return -1;
+        if (!a.isInQueue && b.isInQueue) return 1;
+        if (a.isInQueue && b.isInQueue) return a.pos - b.pos;
+        return a.partName.localeCompare(b.partName);
+      });
 
       let html = `<div style="padding:0 0 10px 0; font-size:20px; font-weight:bold; color:var(--accent)">
         Заказ ${orderNo}
       </div>`;
 
-      html += `<h3 style="margin: 15px 0 10px; color:var(--text-muted); font-size:15px;">В ОЧЕРЕДИ (${activeTasks.length})</h3>`;
-      if (activeTasks.length === 0) {
-        html += '<div style="color:var(--text-muted); font-size:14px; margin-bottom:15px;">Нет активных задач</div>';
-      } else {
-        activeTasks.forEach(t => {
-          const m = state.machines.find(x => x.id === t.machineId);
-          html += `<div class="task-card" style="margin-bottom:6px;">
-            <div class="task-content">
-              <div class="task-header">
-                <span>${m ? m.number + '. ' + m.model : '?'}</span>
-                <span class="task-order">Позиция №${t.pos}</span>
-              </div>
-              <div class="task-part">${t.partName} ${t.isUrgent ? '🚨' : ''} ${t.isSetup ? '🛠️' : ''}</div>
-              <div class="task-qty">⏳ ${t.total - t.done}(${t.total})</div>
-              ${t.note ? `<div class="task-note">📝 ${t.note}</div>` : ''}
-            </div>
-          </div>`;
-        });
+      if (partsArray.length === 0) {
+        html += '<div class="placeholder">В этом заказе пока нет деталей</div>';
+        return html;
       }
 
-      html += `<h3 style="margin: 20px 0 10px; color:var(--text-muted); font-size:15px;">ИСТОРИЯ (${historyItems.length})</h3>`;
-      if (historyItems.length === 0) {
-        html += '<div style="color:var(--text-muted); font-size:14px;">Нет записей</div>';
-      } else {
-        historyItems.forEach(h => {
-          const isCancel = h.type === 'cancel';
-          html += `<div class="history-card" style="margin-bottom:6px;">
-            <div class="history-header">
-              <span>${h.eventDate} · ${h.machineSnapshot}</span>
+      partsArray.forEach(p => {
+        let machineInfo = '';
+        if (p.isInQueue) {
+          const m = state.machines.find(x => x.id === p.machineId);
+          machineInfo = `<span style="color:var(--text-muted); font-size:14px;">${m ? m.number + '. ' + m.model : '?'} · Позиция №${p.pos}</span>`;
+        } else {
+          machineInfo = `<span style="color:var(--ok); font-size:14px;">✓ Выполнено</span>`;
+        }
+
+        let qtyStr = '';
+        if (p.done >= p.total) {
+          qtyStr = `Сделано: ${p.total}`;
+        } else {
+          qtyStr = `Сделано: ${p.done}(${p.total})`;
+        }
+
+        const borderClass = (p.isUrgent && p.isSetup) ? 'is-urgent is-setup' : (p.isUrgent ? 'is-urgent' : (p.isSetup ? 'is-setup' : ''));
+
+        html += `
+          <div class="task-card ${borderClass}" style="margin-bottom:8px; display:block; padding:12px;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px; align-items:center;">
+              <div style="font-weight:600; font-size:16px;">${p.partName}</div>
+              <div style="display:flex; gap:4px;">
+                ${p.isUrgent ? '<span class="urgent-badge">СРОЧНО</span>' : ''}
+                ${p.isSetup ? '<span class="setup-badge">НАСТРОЙКА</span>' : ''}
+              </div>
             </div>
-            <div class="history-part">${h.partName} ${h.isUrgent ? '🚨' : ''} ${h.isSetup ? '🛠️' : ''}</div>
-            <div class="history-qty ${isCancel ? 'cancel' : ''}">${isCancel ? '✕ Отменено' : '✓ ' + h.qty + '/' + h.total}</div>
-            ${h.note ? `<div style="font-size:13px; font-style:italic; color:var(--text-muted); margin-top:4px;">📝 ${h.note}</div>` : ''}
-          </div>`;
-        });
-      }
+            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+              <div>${machineInfo}</div>
+              <div style="font-weight:600; color:var(--warn); font-size:15px;">${qtyStr}</div>
+            </div>
+          </div>
+        `;
+      });
+
       return html;
     }
   },
@@ -1188,7 +1239,6 @@ const screens = {
             </div>`;
         }).join('');
 
-        // ВОЗВРАТ ИЗ ИСТОРИИ
         document.querySelectorAll('.btn-return').forEach(btn => {
           btn.onclick = () => {
             const histItem = state.history.find(x => x.id === btn.dataset.id);
@@ -1281,7 +1331,7 @@ const screens = {
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 2.9 · Финальные правки</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 3.0 · Заказы (сводка)</div>
       `;
     },
     afterRender: () => {
@@ -1357,7 +1407,6 @@ function navigateBack() {
   const param = m ? m[2] : null;
   const action = m ? m[3] : null;
 
-  // Используем replaceState для навигации к родителю, чтобы не плодить историю
   if (action === 'edit') {
     history.replaceState(null, '', `#/${route}/${param}`);
     render();
@@ -1368,7 +1417,6 @@ function navigateBack() {
     history.replaceState(null, '', '#/data');
     render();
   } else {
-    // Если мы на главной вкладке, пытаемся выйти
     window.history.back();
   }
 }
