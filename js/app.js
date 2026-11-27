@@ -117,6 +117,40 @@ function openModal(title, contentHTML, confirmText, onSubmit) {
   setTimeout(() => overlay.querySelector('input[type="text"]')?.focus(), 100);
 }
 
+// --- Общая функция экспорта в Excel ---
+function exportExcelReport(startDate, endDate) {
+  if (typeof XLSX === 'undefined') { showToast('Ошибка Excel. Проверьте интернет.'); return; }
+  const wb = XLSX.utils.book_new();
+  
+  let filtered = state.history.filter(h => h.status === 'active');
+  if (startDate) filtered = filtered.filter(h => h.eventDate >= startDate);
+  if (endDate) filtered = filtered.filter(h => h.eventDate <= endDate);
+  
+  const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего', 'Срочно', 'Настройка', 'Заметка', 'Фото']];
+  filtered.filter(h => h.type === 'done').forEach(h => {
+    wsDoneData.push([
+      h.eventDate, 
+      h.machineSnapshot, 
+      h.orderNo, 
+      h.partName, 
+      h.qty, 
+      h.total, 
+      h.isUrgent ? 'Да' : '', 
+      h.isSetup ? 'Да' : '', 
+      h.note || '',
+      h.photo ? 'Да' : 'Нет'
+    ]);
+  });
+  
+  if (wsDoneData.length === 1) {
+    showToast('Нет данных для отчета за этот период');
+    return;
+  }
+  
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsDoneData), 'Выполнено');
+  XLSX.writeFile(wb, `Отчет_${startDate || 'все'}_${endDate || 'все'}.xlsx`);
+}
+
 // ---- Экраны ----
 const screens = {
   overview: {
@@ -342,12 +376,13 @@ const screens = {
         }, 100);
       };
 
-      // ВЫПОЛНЕНИЕ
+      // ВЫПОЛНЕНИЕ (С ФОТО)
       document.querySelectorAll('.btn-check').forEach(btn => {
         btn.onclick = () => {
           const task = state.currentMachineTasks.find(t => t.id === btn.dataset.id);
           const remaining = task.total - task.done;
           const today = formatDate(new Date());
+          let completedPhoto = null; // Переменная для хранения фото
 
           openModal('Выполнено?', `
             <div style="margin-bottom:12px; font-size:15px; color:var(--text-muted)">
@@ -355,7 +390,14 @@ const screens = {
             </div>
             <div class="form-group"><label>Сколько сделано</label><input type="number" name="qty" value="${remaining}"></div>
             <div class="form-group"><label>Дата выполнения</label><input type="date" name="eventDate" value="${today}"></div>
-            <div class="form-group"><label>Заметка к выполнению</label><textarea name="historyNote" placeholder="Например: сделано с браком"></textarea></div>
+            <div class="form-group"><label>Заметка</label><textarea name="historyNote" placeholder="Комментарий к выполнению"></textarea></div>
+            
+            <div class="form-group">
+              <label>Фото (необязательно)</label>
+              <div id="complete-photo-preview" style="display:none; margin-bottom:10px;"><img id="complete-photo-img" style="max-width:100%; border-radius:8px;"></div>
+              <input type="file" id="complete-photo-input" accept="image/*" style="display:none;">
+              <button type="button" class="btn btn-secondary" id="btn-upload-complete-photo" style="padding:10px; font-size:14px;">Прикрепить фото</button>
+            </div>
           `, 'Подтвердить', async (overlay) => {
             const form = overlay.querySelector('form');
             const qty = parseInt(form.qty.value, 10);
@@ -371,6 +413,7 @@ const screens = {
               orderNo: task.orderNo, partName: task.partName, total: task.total, qty: qty, eventDate, 
               isUrgent: task.isUrgent, isSetup: task.isSetup, 
               note: historyNote,
+              photo: completedPhoto, // Сохраняем фото
               linkedTaskId: task.id, status: 'active'
             };
             await put('history', historyRecord);
@@ -388,6 +431,22 @@ const screens = {
             });
             return true;
           });
+
+          setTimeout(() => {
+            document.getElementById('btn-upload-complete-photo').onclick = () => {
+              document.getElementById('complete-photo-input').click();
+            };
+            document.getElementById('complete-photo-input').onchange = async (e) => {
+              const file = e.target.files[0];
+              if (!file) return;
+              try {
+                showToast('Обработка фото...');
+                completedPhoto = await compressImage(file);
+                document.getElementById('complete-photo-img').src = completedPhoto;
+                document.getElementById('complete-photo-preview').style.display = 'block';
+              } catch(err) { showToast('Ошибка загрузки'); }
+            };
+          }, 100);
         };
       });
 
@@ -652,46 +711,29 @@ const screens = {
       const orderTasks = state.allTasks.filter(t => t.orderNo === orderNo);
       const orderHistory = state.history.filter(h => h.orderNo === orderNo && h.type === 'done' && h.status === 'active');
       
-      // Сбор уникальных деталей по заказу
       const uniqueParts = new Map();
 
-      // Сначала берем активные задачи (они в приоритете, так как содержат актуальный done)
       orderTasks.forEach(t => {
         const key = t.partName.toLowerCase();
         uniqueParts.set(key, {
-          partName: t.partName,
-          total: t.total,
-          done: t.done,
-          isInQueue: true,
-          machineId: t.machineId,
-          pos: t.pos,
-          isUrgent: t.isUrgent,
-          isSetup: t.isSetup
+          partName: t.partName, total: t.total, done: t.done, isInQueue: true,
+          machineId: t.machineId, pos: t.pos, isUrgent: t.isUrgent, isSetup: t.isSetup
         });
       });
 
-      // Добавляем выполненные детали (которых уже нет в очереди)
       orderHistory.forEach(h => {
         const key = h.partName.toLowerCase();
         if (!uniqueParts.has(key)) {
           uniqueParts.set(key, {
-            partName: h.partName,
-            total: h.total,
-            done: 0,
-            isInQueue: false,
-            isUrgent: h.isUrgent,
-            isSetup: h.isSetup
+            partName: h.partName, total: h.total, done: 0, isInQueue: false,
+            isUrgent: h.isUrgent, isSetup: h.isSetup
           });
         }
         const part = uniqueParts.get(key);
-        if (!part.isInQueue) {
-          part.done += h.qty;
-        }
+        if (!part.isInQueue) part.done += h.qty;
       });
 
       const partsArray = Array.from(uniqueParts.values());
-      
-      // Сортировка: сначала в очереди (по позиции), затем выполненные (по алфавиту)
       partsArray.sort((a, b) => {
         if (a.isInQueue && !b.isInQueue) return -1;
         if (!a.isInQueue && b.isInQueue) return 1;
@@ -717,13 +759,7 @@ const screens = {
           machineInfo = `<span style="color:var(--ok); font-size:14px;">✓ Выполнено</span>`;
         }
 
-        let qtyStr = '';
-        if (p.done >= p.total) {
-          qtyStr = `Сделано: ${p.total}`;
-        } else {
-          qtyStr = `Сделано: ${p.done}(${p.total})`;
-        }
-
+        let qtyStr = p.done >= p.total ? `Сделано: ${p.total}` : `Сделано: ${p.done}(${p.total})`;
         const borderClass = (p.isUrgent && p.isSetup) ? 'is-urgent is-setup' : (p.isUrgent ? 'is-urgent' : (p.isSetup ? 'is-setup' : ''));
 
         html += `
@@ -1216,10 +1252,12 @@ const screens = {
           <button class="btn-small" id="btn-all-history">Показать все</button>
         </div>
         <div id="history-list"></div>
+        <button class="fab" id="btn-history-export">+</button>
       `;
     },
     afterRender: () => {
       const list = document.getElementById('history-list');
+      
       const renderList = () => {
         let filtered = state.history.filter(h => h.status === 'active');
         if (state.historyStartDate) filtered = filtered.filter(h => h.eventDate >= state.historyStartDate);
@@ -1235,6 +1273,7 @@ const screens = {
               <div class="history-part">${h.partName} ${h.isUrgent ? '🚨' : ''} ${h.isSetup ? '🛠️' : ''}</div>
               <div class="history-qty ${isCancel ? 'cancel' : ''}">${isCancel ? '✕ Отменено (остаток ' + h.qty + ')' : '✓ Сделано ' + h.qty + ' из ' + h.total}</div>
               ${h.note ? `<div style="font-size:13px; font-style:italic; color:var(--text-muted); margin-top:4px;">📝 ${h.note}</div>` : ''}
+              ${h.photo ? `<img src="${h.photo}" style="max-width:100%; max-height:200px; border-radius:8px; margin-top:8px; object-fit:contain;">` : ''}
               <div class="history-actions"><button class="btn-small btn-return" data-id="${h.id}">${isCancel ? 'Возобновить' : 'Вернуть'}</button></div>
             </div>`;
         }).join('');
@@ -1303,6 +1342,7 @@ const screens = {
           };
         });
       };
+
       document.getElementById('hist-start').onchange = (e) => { state.historyStartDate = e.target.value; renderList(); };
       document.getElementById('hist-end').onchange = (e) => { state.historyEndDate = e.target.value; renderList(); };
       document.getElementById('btn-all-history').onclick = () => {
@@ -1310,6 +1350,12 @@ const screens = {
         document.getElementById('hist-start').value = ''; document.getElementById('hist-end').value = '';
         renderList();
       };
+      
+      // Кнопка экспорта из истории (использует выбранные даты)
+      document.getElementById('btn-history-export').onclick = () => {
+        exportExcelReport(state.historyStartDate, state.historyEndDate);
+      };
+
       renderList();
     }
   },
@@ -1326,12 +1372,12 @@ const screens = {
         </div>
         <div class="card">
           <h3>Данные</h3>
-          <button class="btn-block" id="btn-export-excel">📊 Экспорт в Excel</button>
+          <button class="btn-block" id="btn-export-excel">📊 Экспорт в Excel (за все время)</button>
           <button class="btn-block" id="btn-backup">💾 Сохранить резервную копию</button>
           <button class="btn-block" id="btn-restore">📂 Загрузить копию</button>
           <input type="file" id="file-restore" accept=".json" style="display:none;">
         </div>
-        <div class="placeholder" style="padding:20px 0;">Версия 3.0 · Заказы (сводка)</div>
+        <div class="placeholder" style="padding:20px 0;">Версия 3.1 · Фото в истории</div>
       `;
     },
     afterRender: () => {
@@ -1339,16 +1385,9 @@ const screens = {
         r.addEventListener('change', () => { localStorage.setItem('theme', r.value); applyTheme(); });
       });
 
+      // Экспорт из настроек (за все время)
       document.getElementById('btn-export-excel').onclick = () => {
-        if (typeof XLSX === 'undefined') { showToast('Ошибка Excel'); return; }
-        const wb = XLSX.utils.book_new();
-        const historyActive = state.history.filter(h => h.status === 'active');
-        const wsDoneData = [['Дата', 'Станок', 'Заказ', 'Деталь', 'Сделано', 'Всего', 'Срочно', 'Настройка', 'Заметка']];
-        historyActive.filter(h => h.type === 'done').forEach(h => {
-          wsDoneData.push([h.eventDate, h.machineSnapshot, h.orderNo, h.partName, h.qty, h.total, h.isUrgent ? 'Да' : '', h.isSetup ? 'Да' : '', h.note || '']);
-        });
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(wsDoneData), 'Выполнено');
-        XLSX.writeFile(wb, `Отчет_${formatDate(new Date())}.xlsx`);
+        exportExcelReport('', '');
       };
 
       document.getElementById('btn-backup').onclick = async () => {
